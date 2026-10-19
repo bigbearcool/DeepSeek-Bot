@@ -66,13 +66,13 @@ fun PairScreen(
                 .fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Bridge base URL", style = MaterialTheme.typography.labelLarge)
+            Text("服务器地址（扫码会自动填好；手动填写仅作备用）", style = MaterialTheme.typography.labelLarge)
             OutlinedTextField(
                 value = state.baseUrl,
                 onValueChange = onBaseUrlChange,
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                placeholder = { Text("http://nas:port/api/mobile-bridge/v1") },
+                placeholder = { Text("先扫电脑上的配对二维码，或填 http://局域网IP:3081") },
             )
             OutlinedButton(onClick = onSaveBaseUrl, modifier = Modifier.fillMaxWidth()) {
                 Text("Save URL")

@@ -75,6 +75,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun pair() = viewModelScope.launch {
+        PairCode.parse(_state.value.pairInput)?.baseUrl?.let { u -> _state.update { it.copy(baseUrl = u) } }
         val code = PairCode.normalize(_state.value.pairInput)
             ?: run {
                 _state.update { it.copy(status = "Need 6-hex code or dshmb:<code>") }

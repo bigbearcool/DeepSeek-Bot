@@ -12,7 +12,9 @@ class AuthRepository(
 ) {
     suspend fun effectiveBaseUrl(): String {
         val saved = store.current().baseUrl
-        return if (saved.isNotBlank()) saved else BuildConfig.DEFAULT_BASE_URL
+        val base = BridgeApi.normalizeBase(if (saved.isNotBlank()) saved else BuildConfig.DEFAULT_BASE_URL)
+        if (base.isBlank()) throw BridgeError("请先扫描电脑上「手机配对」的二维码，或手动填写服务器地址")
+        return base
     }
 
     suspend fun saveBaseUrl(url: String) {

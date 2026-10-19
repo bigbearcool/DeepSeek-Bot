@@ -11,10 +11,10 @@ android {
         applicationId = "com.deepseek.dshmobile"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.1.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("String", "DEFAULT_BASE_URL", "\"https://dshmb.bigbear.cool:8443\"")
+        buildConfigField("String", "DEFAULT_BASE_URL", "\"\"")
     }
 
     buildTypes {

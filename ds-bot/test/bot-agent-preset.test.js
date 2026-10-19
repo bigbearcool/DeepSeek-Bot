@@ -90,7 +90,7 @@ test('a pinned preset the profile no longer serves falls back to standard', asyn
 })
 
 test('update_bot pins, changes and clears a Bot\'s agent preset', async (t) => {
-  const { rt, created, stop } = start({ presets: [{ id: 'standard' }, { id: 'researcher' }, { id: 'coder' }] })
+  const { rt, stop } = start({ presets: [{ id: 'standard' }, { id: 'researcher' }, { id: 'coder' }] })
   t.after(stop)
   await rt.load()
   await rt.updateBot('chief', { agentPreset: 'researcher' })

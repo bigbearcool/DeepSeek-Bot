@@ -1,10 +1,14 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { displayItems, partsOfBot } from './chat-format.js'
+
+const HISTORY_TIMEOUT_MS = 20_000
+const PAGE_SIZE = 60
 
 /**
- * Read-only view of the ds-bot team from its state file, plus optional send via
- * the shared DSH sessionController when the host injects it.
+ * Read-only team + chat history from ds-bot state + sessionController.page,
+ * send via sessionController.prompt when available.
  */
 export function createDsBotAdapter({ dshHome, botHome, ctx, logger = console } = {}) {
   const statePath = join(botHome ?? join(dshHome, 'bot'), 'state.json')
@@ -16,6 +20,10 @@ export function createDsBotAdapter({ dshHome, botHome, ctx, logger = console } =
       if (error?.code === 'ENOENT') return null
       throw error
     }
+  }
+
+  function sessionController() {
+    return ctx?.get?.('sessionController') ?? ctx?.sessionController
   }
 
   async function team() {
@@ -47,22 +55,117 @@ export function createDsBotAdapter({ dshHome, botHome, ctx, logger = console } =
     }
   }
 
-  async function history({ botId, cursor, limit = 50 } = {}) {
-    // TODO: wire to ds-bot chatPage / session event log. Skeleton returns an empty page.
-    void cursor
-    const snapshot = await team()
-    const bot = snapshot.bots.find(item => item.id === botId)
-    if (!bot) {
-      return { available: snapshot.available, botId, items: [], nextCursor: null, stub: true, reason: snapshot.available ? 'unknown bot' : snapshot.reason }
+  /** Map sessionId → botId for own chats (current + earlier segments). */
+  async function chatOwners() {
+    const state = await readState()
+    const map = new Map()
+    if (!state?.bots) return map
+    for (const bot of Object.values(state.bots)) {
+      for (const part of partsOfBot(state, bot.id)) {
+        map.set(part.sessionId, bot.id)
+      }
     }
-    return {
-      available: true,
-      botId,
-      items: [],
-      nextCursor: null,
-      stub: true,
-      reason: 'history not wired yet; use desktop/web or extend adapter to call ds-bot chatPage',
-      limit,
+    return map
+  }
+
+  async function partPage(state, parts, index, cursor) {
+    const part = parts[index]
+    const sc = sessionController()
+    if (!sc?.page) {
+      return {
+        items: [],
+        cursor: null,
+        stub: true,
+        reason: 'sessionController.page not available',
+      }
+    }
+    // throughSeq: prefer live agent seq (same as ds-bot partPage); else a high bound.
+    let throughSeq = Number.MAX_SAFE_INTEGER - 1
+    if (typeof sc.resolveAgent === 'function') {
+      try {
+        const resolved = await sc.resolveAgent(part.sessionId)
+        if (resolved && !('error' in resolved)) {
+          const seq = resolved.agent?.session?.seq
+          if (Number.isFinite(seq)) throughSeq = Number(seq) - 1
+        }
+      } catch {
+        /* keep bound */
+      }
+    }
+    const page = await sc.page({
+      address: { kind: 'session', sessionId: part.sessionId },
+      throughSeq,
+      ...(Number.isInteger(cursor?.beforeSeq) ? { beforeSeq: cursor.beforeSeq } : {}),
+      maxMessages: PAGE_SIZE,
+    }, AbortSignal.timeout(HISTORY_TIMEOUT_MS))
+    const events = (page.records ?? []).map(record => record.event ?? record)
+    const items = displayItems(part.sessionId, events, state.exchangeTurns ?? {})
+    const more = page.hasMore && events.length > 0
+    if (!more && index > 0) {
+      items.unshift({ kind: 'divider', time: part.startedAt })
+    }
+    const nextCursor = more
+      ? { part: index, beforeSeq: events[0]?.seq }
+      : index > 0
+        ? { part: index - 1 }
+        : null
+    return { items, cursor: nextCursor, sessionId: part.sessionId, stub: false }
+  }
+
+  async function history({ botId, cursor, limit = PAGE_SIZE } = {}) {
+    void limit
+    const state = await readState()
+    if (state === null) {
+      return {
+        available: false,
+        botId,
+        items: [],
+        nextCursor: null,
+        stub: true,
+        reason: 'ds-bot state.json not found',
+      }
+    }
+    const parts = partsOfBot(state, botId)
+    if (parts.length === 0) {
+      return { available: true, botId, items: [], nextCursor: null, stub: false, reason: 'unknown bot' }
+    }
+    let parsed = cursor
+    if (typeof cursor === 'string' && cursor !== '') {
+      try { parsed = JSON.parse(cursor) } catch { parsed = null }
+    }
+    const index = Number.isInteger(parsed?.part) ? parsed.part : parts.length - 1
+    if (index < 0 || index >= parts.length) {
+      return {
+        available: true,
+        botId,
+        sessionId: parts.at(-1).sessionId,
+        items: [],
+        nextCursor: null,
+        stub: false,
+      }
+    }
+    try {
+      const page = await partPage(state, parts, index, parsed)
+      return {
+        available: true,
+        botId,
+        sessionId: parts.at(-1).sessionId,
+        items: page.items,
+        nextCursor: page.cursor,
+        stub: page.stub === true,
+        ...(page.reason ? { reason: page.reason } : {}),
+      }
+    } catch (error) {
+      logger.warn?.(`[mobile-bridge] history failed: ${error?.message ?? error}`)
+      return {
+        available: true,
+        botId,
+        sessionId: parts.at(-1).sessionId,
+        items: [],
+        nextCursor: null,
+        stub: true,
+        reason: String(error?.message ?? error),
+      }
     }
   }
 
@@ -80,9 +183,9 @@ export function createDsBotAdapter({ dshHome, botHome, ctx, logger = console } =
       err.status = snapshot.available ? 404 : 503
       throw err
     }
-    const sessionController = ctx?.get?.('sessionController') ?? ctx?.sessionController
-    if (sessionController?.prompt) {
-      await sessionController.prompt({
+    const sc = sessionController()
+    if (sc?.prompt) {
+      await sc.prompt({
         requestId: randomUUID(),
         sessionId: bot.sessionId,
         mode: 'queue',
@@ -90,16 +193,15 @@ export function createDsBotAdapter({ dshHome, botHome, ctx, logger = console } =
       }, AbortSignal.timeout(30_000))
       return { ok: true, botId, sessionId: bot.sessionId, via: 'sessionController.prompt' }
     }
-    // Clear stub so callers know how to finish the wiring.
     return {
       ok: false,
       stub: true,
       status: 501,
       botId,
       sessionId: bot.sessionId,
-      reason: 'sessionController.prompt not available in this host; TODO: call ds-bot send endpoint or inject sessionController',
+      reason: 'sessionController.prompt not available in this host',
     }
   }
 
-  return { statePath, team, history, send }
+  return { statePath, team, history, send, chatOwners, readState }
 }

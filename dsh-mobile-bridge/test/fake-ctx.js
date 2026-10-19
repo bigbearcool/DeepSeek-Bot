@@ -2,11 +2,27 @@ export function fakeContext({ services = {} } = {}) {
   const calls = []
   const routes = []
   const disposers = []
+  /** @type {Map<string, Function[]>} */
+  const listeners = new Map()
   return {
     calls,
     routes,
     logger: { info() {}, warn() {} },
     get: name => services[name],
+    on(event, handler) {
+      const list = listeners.get(event) ?? []
+      list.push(handler)
+      listeners.set(event, list)
+      return () => {
+        const next = (listeners.get(event) ?? []).filter(h => h !== handler)
+        listeners.set(event, next)
+      }
+    },
+    emit(event, ...args) {
+      for (const handler of listeners.get(event) ?? []) {
+        try { void handler(...args) } catch { /* test harness */ }
+      }
+    },
     effect(execute, label) {
       calls.push(`effect ${label}`)
       const dispose = execute()

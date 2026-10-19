@@ -5,6 +5,13 @@ export function json(data, status = 200, headers = {}) {
   })
 }
 
+export function html(body, status = 200, headers = {}) {
+  return new Response(body, {
+    status,
+    headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...headers },
+  })
+}
+
 export function error(status, message, extra = {}) {
   return json({ ok: false, error: { message, ...extra } }, status)
 }

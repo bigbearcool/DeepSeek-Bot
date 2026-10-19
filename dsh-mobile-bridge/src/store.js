@@ -39,11 +39,27 @@ export function createStore({ home, now = Date.now } = {}) {
 
   async function beginPair() {
     await load()
+    // One active code at a time (UI regenerate invalidates the previous unused code).
+    data.pairings = {}
     const code = randomBytes(3).toString('hex') // 6 hex chars
     const expiresAt = now() + PAIR_TTL_MS
     data.pairings[code] = { expiresAt }
     await save()
-    return { code, expiresAt }
+    return { code, expiresAt, expiresIn: Math.floor(PAIR_TTL_MS / 1000) }
+  }
+
+  async function activePair() {
+    await load()
+    const entries = Object.entries(data.pairings)
+      .filter(([, p]) => (p.expiresAt ?? 0) >= now())
+      .sort((a, b) => b[1].expiresAt - a[1].expiresAt)
+    if (!entries.length) return null
+    const [code, p] = entries[0]
+    return {
+      code,
+      expiresAt: p.expiresAt,
+      expiresIn: Math.max(0, Math.floor((p.expiresAt - now()) / 1000)),
+    }
   }
 
   async function completePair({ code, deviceId, label = '' }) {
@@ -103,5 +119,5 @@ export function createStore({ home, now = Date.now } = {}) {
     return Object.values(data.devices).map(({ id, label, createdAt, revoked }) => ({ id, label, createdAt, revoked: !!revoked }))
   }
 
-  return { path, beginPair, completePair, issueAccess, requireAccess, revoke, listDevices, load }
+  return { path, beginPair, activePair, completePair, issueAccess, requireAccess, revoke, listDevices, load }
 }

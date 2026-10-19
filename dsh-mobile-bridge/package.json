@@ -1,6 +1,6 @@
 {
   "name": "dsh-mobile-bridge",
-  "version": "0.0.1",
+  "version": "0.0.4",
   "description": "Remote control surface for DS Bot on phones: device auth, team list, chat, SSE. Does not replace ds-bot UI.",
   "type": "module",
   "main": "index.js",
@@ -11,7 +11,12 @@
   "scripts": {
     "test": "node --test test/*.test.js"
   },
-  "keywords": ["dsh-plugin", "deepseek-harness", "mobile", "bridge"],
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "mobile",
+    "bridge"
+  ],
   "license": "Apache-2.0",
   "peerDependencies": {
     "@deepseek-ai/cordis": "*"

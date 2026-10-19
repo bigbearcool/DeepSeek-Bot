@@ -1,10 +1,25 @@
 import { API_PREFIX, NAME, VERSION } from './constants.js'
-import { bearer, error, json, pathOf, readJson } from './http.js'
+import { bearer, error, html, json, pathOf, readJson } from './http.js'
+import { pairPageHtml } from './pair-page.js'
+import { pairPayload, qrSvg } from './qr.js'
 
-const encoder = new TextEncoder()
+/** Paths never served on the device listener (host-only, behind dsh login on 3080). */
+export const HOST_ONLY_PATHS = new Set([
+  '/ui', '/pair', '/auth/pair/begin', '/auth/pair/active', '/auth/pair/qr', '/devices/revoke',
+])
+/** Paths reachable on the device listener without a bearer token. */
+export const DEVICE_PUBLIC_PATHS = new Set(['/health', '/auth/pair/complete', '/auth/token'])
+export const RATE_LIMITED_PATHS = new Set(['/auth/pair/complete', '/auth/token'])
 
-export function installRoutes(rt) {
-  const { ctx, store, adapter } = rt
+/**
+ * Build the request handler.
+ * surface 'web'    — dsh connection routes (3080, protected by dsh login).
+ * surface 'device' — standalone listener (3081): host-only paths 404, bearer required except
+ *                    DEVICE_PUBLIC_PATHS, pair/complete + token rate-limited by client IP.
+ */
+export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
+  const { store, adapter, feed } = rt
+  const device = surface === 'device'
 
   const withAuth = async (request, next) => {
     const token = bearer(request)
@@ -17,18 +32,82 @@ export function installRoutes(rt) {
     }
   }
 
-  const handle = async (request) => {
+  const originOf = (request) => {
+    try {
+      const url = new URL(request.url)
+      return url.origin
+    } catch {
+      return ''
+    }
+  }
+
+  const ensurePair = async () => {
+    const active = await store.activePair()
+    if (active) return active
+    return store.beginPair()
+  }
+
+  const handle = async (request, info = {}) => {
     const method = request.method.toUpperCase()
     const sub = pathOf(request, API_PREFIX)
     if (sub === null) return error(404, 'not found')
+
+    if (device) {
+      if (HOST_ONLY_PATHS.has(sub)) return error(404, `no route ${method} ${sub}`)
+      if (RATE_LIMITED_PATHS.has(sub) && limiter) {
+        const verdict = limiter.hit(`${sub}|${info.clientIp ?? 'unknown'}`)
+        if (!verdict.ok) {
+          return json({ ok: false, error: { message: 'too many requests' } }, 429,
+            { 'retry-after': String(Math.ceil(verdict.retryAfterMs / 1000)) })
+        }
+      }
+      if (sub === '/devices' && method === 'GET') {
+        return withAuth(request, async () => json({ ok: true, devices: await store.listDevices() }))
+      }
+    }
 
     if (method === 'GET' && sub === '/health') {
       return json({ ok: true, name: NAME, version: VERSION })
     }
 
+    // Host-local pairing UI (open in dsh Web / desktop browser on LAN).
+    if (method === 'GET' && (sub === '/ui' || sub === '/pair')) {
+      const pairing = await ensurePair()
+      const devices = await store.listDevices()
+      const origin = originOf(request)
+      return html(pairPageHtml({
+        code: pairing.code,
+        expiresAt: pairing.expiresAt,
+        expiresIn: pairing.expiresIn,
+        devices,
+        origin,
+      }))
+    }
+
     if (method === 'POST' && sub === '/auth/pair/begin') {
       const pairing = await store.beginPair()
       return json({ ok: true, ...pairing })
+    }
+
+    if (method === 'GET' && sub === '/auth/pair/active') {
+      const pairing = await store.activePair()
+      if (!pairing) return json({ ok: true, active: false })
+      return json({ ok: true, active: true, ...pairing })
+    }
+
+    if (method === 'GET' && sub === '/auth/pair/qr') {
+      const pairing = await store.activePair()
+      if (!pairing) return error(404, 'no active pairing code')
+      const origin = originOf(request)
+      const payload = pairPayload(pairing.code, { origin, apiPrefix: API_PREFIX })
+      return json({
+        ok: true,
+        code: pairing.code,
+        expiresAt: pairing.expiresAt,
+        expiresIn: pairing.expiresIn,
+        payload,
+        svg: qrSvg(payload, { size: 200 }),
+      })
     }
 
     if (method === 'POST' && sub === '/auth/pair/complete') {
@@ -61,6 +140,7 @@ export function installRoutes(rt) {
         const botId = url.searchParams.get('botId') ?? ''
         const cursor = url.searchParams.get('cursor')
         const limit = Number(url.searchParams.get('limit') ?? 50)
+        if (!botId) return error(400, 'botId required')
         return json({ ok: true, ...(await adapter.history({ botId, cursor, limit })) })
       })
     }
@@ -80,36 +160,11 @@ export function installRoutes(rt) {
 
     if (method === 'GET' && sub === '/stream') {
       return withAuth(request, async (device) => {
-        let controller
-        let tick
-        const body = new ReadableStream({
-          start(own) {
-            controller = own
-            const hello = encoder.encode(`event: hello\ndata: ${JSON.stringify({ deviceId: device.id, name: NAME, version: VERSION })}\n\n`)
-            own.enqueue(hello)
-            // Test tick so clients can verify SSE without a live Bot turn.
-            tick = setInterval(() => {
-              try {
-                own.enqueue(encoder.encode(`event: test\ndata: ${JSON.stringify({ t: Date.now() })}\n\n`))
-              } catch { /* closed */ }
-            }, 15_000)
-            tick.unref?.()
-          },
-          cancel() {
-            clearInterval(tick)
-          },
-        })
-        request.signal.addEventListener('abort', () => {
-          clearInterval(tick)
-          try { controller?.close() } catch { /* */ }
-        }, { once: true })
-        return new Response(body, {
-          status: 200,
-          headers: {
-            'content-type': 'text/event-stream; charset=utf-8',
-            'cache-control': 'no-store',
-          },
-        })
+        const url = new URL(request.url)
+        const botId = url.searchParams.get('botId') || null
+        // Default: live feed from session/agent events. ?mode=test keeps hello+test ticks.
+        const test = url.searchParams.get('mode') === 'test'
+        return feed.openStream(request, { device, botId, test })
       })
     }
 
@@ -118,13 +173,31 @@ export function installRoutes(rt) {
       return json({ ok: true, devices: await store.listDevices() })
     }
 
+    if (method === 'POST' && sub === '/devices/revoke') {
+      const body = await readJson(request)
+      const deviceId = String(body.deviceId ?? '').trim()
+      if (!deviceId) return error(400, 'deviceId required')
+      await store.revoke(deviceId)
+      return json({ ok: true, deviceId })
+    }
+
     return error(404, `no route ${method} ${sub}`)
   }
+  return handle
+}
+
+export function installRoutes(rt) {
+  const { ctx } = rt
+  const handle = createHandler(rt, { surface: 'web' })
 
   // One registration per concrete path: DSH fetch routes are exact matches (like ds-bot).
   const paths = [
     ['/health', ['GET']],
+    ['/ui', ['GET']],
+    ['/pair', ['GET']],
     ['/auth/pair/begin', ['POST']],
+    ['/auth/pair/active', ['GET']],
+    ['/auth/pair/qr', ['GET']],
     ['/auth/pair/complete', ['POST']],
     ['/auth/token', ['POST']],
     ['/team', ['GET']],
@@ -132,6 +205,7 @@ export function installRoutes(rt) {
     ['/chats/send', ['POST']],
     ['/stream', ['GET']],
     ['/devices', ['GET']],
+    ['/devices/revoke', ['POST']],
   ]
 
   for (const [suffix, methods] of paths) {

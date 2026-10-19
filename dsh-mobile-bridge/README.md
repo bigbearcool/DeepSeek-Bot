@@ -2,10 +2,11 @@
 
 Mobile remote-control plugin for DeepSeek Harness (see `docs/plans/2026-10-20-mobile-native-dsh-bridge.md`).
 
-## What it does (0.0.4)
+## What it does (0.0.5)
 
 - Health check
 - **Host pairing UI** (`GET /ui`): one-time code, countdown, regenerate, QR (`dshmb:<code>`), paired-device list + kick
+- **Web 入口**：dsh 侧栏底部「手机配对」按钮（client 半边），一点即打开配对页；不用手输 URL
 - Device pairing + short-lived access tokens
 - Read-only Bot list from ds-bot `state.json`
 - Chat history via `sessionController.page` (same part/cursor semantics as ds-bot `chatPage`, slim `displayItems` for phone)
@@ -36,13 +37,15 @@ Then `pnpm install` in the profile and start dsh as usual.
 
 ## Pairing (host UI)
 
-On the machine running dsh / DS Bot, open:
+**推荐**：登录 dsh Web 后，在左侧栏底部点 **「手机配对」**，打开配对页。
+
+也可直接打开（需已登录 dsh）：
 
 `http://<本机或局域网>:port/api/mobile-bridge/v1/ui`
 
-(or `/api/mobile-bridge/v1/pair`)
+（或 `/api/mobile-bridge/v1/pair`）
 
-The page shows a 6-character code (5 minutes), a QR encoding `dshmb:<code>`, copy buttons, regenerate, and a list of paired devices you can kick. Phone apps redeem the code with `POST /auth/pair/complete`.
+配对页会显示 6 位码（约 5 分钟有效）、倒计时、复制、重新生成、二维码，以及已配对设备列表。页面上写明了 App 里应填的服务器地址（默认 `https://dshmb.bigbear.cool:8443`）。手机用 `POST /auth/pair/complete` 兑换配对码。
 
 ## Routes
 
@@ -51,18 +54,18 @@ Prefix: `/api/mobile-bridge/v1`
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | GET | `/health` | no | `{ ok, name, version }` |
-| GET | `/ui` or `/pair` | no | Host HTML pairing screen |
-| POST | `/auth/pair/begin` | no | Create / rotate a short pairing code |
-| GET | `/auth/pair/active` | no | Current unused code (if any) |
-| GET | `/auth/pair/qr` | no | `{ code, payload, svg }` for the active code |
+| GET | `/ui` or `/pair` | dsh login (3080) | Host HTML pairing screen；3081 不提供 |
+| POST | `/auth/pair/begin` | dsh login (3080) | Create / rotate a short pairing code |
+| GET | `/auth/pair/active` | dsh login (3080) | Current unused code (if any) |
+| GET | `/auth/pair/qr` | dsh login (3080) | `{ code, payload, svg }` for the active code |
 | POST | `/auth/pair/complete` | no | Phone redeems code → device + refresh token |
 | POST | `/auth/token` | no | refresh → access token |
 | GET | `/team` | Bearer | Bots from `$DSH_HOME/bot/state.json` |
 | GET | `/chats/history?botId=&cursor=` | Bearer | Real page; `nextCursor` for earlier parts |
 | POST | `/chats/send` | Bearer | Tries `sessionController.prompt`; else `501` stub |
 | GET | `/stream` | Bearer | Live SSE (default). `?botId=` filter. `?mode=test` for ticks |
-| GET | `/devices` | no* | List paired devices (*host UI; bind to local session later) |
-| POST | `/devices/revoke` | no* | `{ deviceId }` kick device |
+| GET | `/devices` | no* / Bearer on 3081 | List paired devices (*host UI on 3080) |
+| POST | `/devices/revoke` | dsh login (3080) | `{ deviceId }` kick device |
 
 ## Tests
 
@@ -70,7 +73,7 @@ Prefix: `/api/mobile-bridge/v1`
 cd dsh-mobile-bridge && npm test
 ```
 
-## Device listener (0.0.4)
+## Device listener (0.0.4+)
 
 dsh 0.2.1-rc.2 fetch routes all sit behind dsh web login, so phones get 401. The plugin
 therefore also listens on its own port, same paths under `/api/mobile-bridge/v1/*`.

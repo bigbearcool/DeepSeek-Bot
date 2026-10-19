@@ -1,13 +1,21 @@
 {
   "name": "dsh-mobile-bridge",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Remote control surface for DS Bot on phones: device auth, team list, chat, SSE. Does not replace ds-bot UI.",
   "type": "module",
   "main": "index.js",
   "exports": {
     ".": "./index.js",
+    "./client": "./client.js",
     "./package.json": "./package.json"
   },
+  "files": [
+    "index.js",
+    "client.js",
+    "src/",
+    "cordis.patch.yml",
+    "README.md"
+  ],
   "scripts": {
     "test": "node --test test/*.test.js"
   },
@@ -24,6 +32,13 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
     }
   }
 }

@@ -1,5 +1,5 @@
 export const NAME = 'dsh-mobile-bridge'
-export const VERSION = '0.0.4'
+export const VERSION = '0.0.5'
 export const API_PREFIX = '/api/mobile-bridge/v1'
 
 /** Access token lifetime (ms). */
@@ -16,3 +16,6 @@ export const DEVICE_PORT = 3081
 export const DEVICE_HOST = '127.0.0.1'
 export const TRUSTED_PROXIES = ['127.0.0.1', '::1', '::ffff:127.0.0.1']
 export const RATE_LIMIT = { max: 10, windowMs: 60 * 1000 }
+
+/** Server address the phone App should use (shown on the host pairing page). */
+export const APP_SERVER_URL = 'https://dshmb.bigbear.cool:8443'

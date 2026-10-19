@@ -5,8 +5,9 @@ import { pairPayload, qrSvg } from './qr.js'
  * Host-local pairing UI. Served at GET /api/mobile-bridge/v1/ui
  * (Web / 3080 only). Calls the same pair/begin + devices APIs.
  */
-export function pairPageHtml({ code, expiresAt, expiresIn, devices = [], origin = '' } = {}) {
-  const payload = code ? pairPayload(code, { origin, apiPrefix: API_PREFIX }) : ''
+export function pairPageHtml({ code, expiresAt, expiresIn, devices = [], origin = '', appUrl = APP_SERVER_URL } = {}) {
+  void origin
+  const payload = code ? pairPayload(code, { appUrl }) : ''
   const qr = code ? qrSvg(payload, { size: 200 }) : ''
   const ttlMin = Math.max(1, Math.round(PAIR_TTL_MS / 60000))
   const safeDevices = JSON.stringify(devices).replace(/</g, '\\u003c')
@@ -16,7 +17,6 @@ export function pairPageHtml({ code, expiresAt, expiresIn, devices = [], origin 
     expiresIn: expiresIn ?? null,
     payload,
   }).replace(/</g, '\\u003c')
-  const appUrl = APP_SERVER_URL
 
   return `<!doctype html>
 <html lang="zh-CN">

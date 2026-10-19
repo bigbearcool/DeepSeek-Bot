@@ -91,7 +91,7 @@ test('health is open', async (t) => {
   const { status, body } = await h.json('GET', '/api/mobile-bridge/v1/health')
   assert.equal(status, 200)
   assert.equal(body.name, 'dsh-mobile-bridge')
-  assert.equal(body.version, '0.0.6')
+  assert.equal(body.version, '0.0.7')
   assert.equal(body.ok, true)
 })
 
@@ -266,7 +266,7 @@ test('pair UI page returns HTML with code and QR', async (t) => {
   assert.match(body, /重新生成/)
   assert.match(body, /复制配对码/)
   assert.match(body, /已配对设备/)
-  assert.match(body, /https:\/\/dshmb\.bigbear\.cool:8443/)
+  assert.doesNotMatch(body, /dshmb\.bigbear\.cool/)
   assert.match(body, /约 5 分钟/)
   assert.match(body, /<svg[\s\S]*role="img"/)
   // 6 hex code appears (possibly spaced) in the page

@@ -1,5 +1,5 @@
 import { createServer } from 'node:http'
-import { DEVICE_HOST, DEVICE_PORT, NAME, RATE_LIMIT, TRUSTED_PROXIES } from './constants.js'
+import { DEVICE_HOST, DEVICE_HOST_LOCAL, DEVICE_PORT, NAME, RATE_LIMIT, TRUSTED_PROXIES } from './constants.js'
 import { createHandler } from './routes.js'
 
 /** Fixed-window limiter keyed by string. */
@@ -45,7 +45,8 @@ export function clientIpOf(remoteAddress, headers, trusted = TRUSTED_PROXIES) {
 export function startDeviceServer(rt, config = {}) {
   const { ctx } = rt
   const port = config.devicePort ?? DEVICE_PORT
-  const host = config.deviceHost ?? DEVICE_HOST
+  // deviceLan: false → loopback only (e.g. behind a same-host reverse proxy). deviceHost overrides.
+  const host = config.deviceHost ?? (config.deviceLan === false ? DEVICE_HOST_LOCAL : DEVICE_HOST)
   const trusted = config.trustedProxies ?? TRUSTED_PROXIES
   const limiter = createRateLimiter(config.rateLimit ?? {})
   const handle = createHandler(rt, { surface: 'device', limiter })

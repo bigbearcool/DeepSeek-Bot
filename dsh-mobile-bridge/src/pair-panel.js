@@ -36,11 +36,11 @@ export function formatCountdown(expiresAt, now = Date.now()) {
 /**
  * Normalize pair/begin or pair/active + optional qr body into panel state.
  */
-export function assemblePairState(beginOrActive, qr = null) {
+export function assemblePairState(beginOrActive, qr = null, appUrl = APP_SERVER_URL) {
   const code = beginOrActive?.code ?? null
   const expiresAt = beginOrActive?.expiresAt ?? null
   const payload = qr?.payload
-    || (code ? `dshmb:${String(code).trim()}` : '')
+    || (code ? `dshmb:${String(code).trim()}${(qr?.appUrl || appUrl) ? '@' + (qr?.appUrl || appUrl) : ''}` : '')
   const svg = qr?.svg || ''
   return {
     code,
@@ -48,6 +48,7 @@ export function assemblePairState(beginOrActive, qr = null) {
     expiresIn: expiresAt != null ? Math.max(0, Math.floor((expiresAt - Date.now()) / 1000)) : null,
     payload,
     svg,
+    appUrl: qr?.appUrl || appUrl,
   }
 }
 

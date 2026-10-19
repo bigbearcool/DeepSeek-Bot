@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { randomBytes, createHash } from 'node:crypto'
 import { ACCESS_TTL_MS, PAIR_TTL_MS, REFRESH_TTL_MS, STORE_FILE } from './constants.js'
 
-const empty = () => ({ version: 1, devices: {}, pairings: {} })
+const empty = () => ({ version: 1, devices: {}, pairings: {}, settings: {} })
 
 function token() {
   return randomBytes(24).toString('base64url')
@@ -24,6 +24,7 @@ export function createStore({ home, now = Date.now } = {}) {
       data = { ...empty(), ...JSON.parse(await readFile(path, 'utf8')) }
       data.devices ??= {}
       data.pairings ??= {}
+      data.settings ??= {}
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error
       data = empty()
@@ -119,5 +120,17 @@ export function createStore({ home, now = Date.now } = {}) {
     return Object.values(data.devices).map(({ id, label, createdAt, revoked }) => ({ id, label, createdAt, revoked: !!revoked }))
   }
 
-  return { path, beginPair, activePair, completePair, issueAccess, requireAccess, revoke, listDevices, load }
+  async function getSettings() {
+    await load()
+    return { publicUrl: data.settings.publicUrl ?? '' }
+  }
+
+  async function setSettings(patch = {}) {
+    await load()
+    data.settings = { ...data.settings, ...patch }
+    await save()
+    return getSettings()
+  }
+
+  return { path, getSettings, setSettings, beginPair, activePair, completePair, issueAccess, requireAccess, revoke, listDevices, load }
 }

@@ -1,4 +1,5 @@
-import { API_PREFIX, NAME, VERSION } from './constants.js'
+import { API_PREFIX, NAME, VERSION, appUrlOf, cleanHttpUrl } from './constants.js'
+import { lanUrl } from './lan.js'
 import { bearer, error, html, json, pathOf, readJson } from './http.js'
 import { pairPageHtml } from './pair-page.js'
 import { pairPayload, qrSvg } from './qr.js'
@@ -6,6 +7,7 @@ import { pairPayload, qrSvg } from './qr.js'
 /** Paths never served on the device listener (host-only, behind dsh login on 3080). */
 export const HOST_ONLY_PATHS = new Set([
   '/ui', '/pair', '/auth/pair/begin', '/auth/pair/active', '/auth/pair/qr', '/devices/revoke',
+  '/settings',
 ])
 /** Paths reachable on the device listener without a bearer token. */
 export const DEVICE_PUBLIC_PATHS = new Set(['/health', '/auth/pair/complete', '/auth/token'])
@@ -19,6 +21,13 @@ export const RATE_LIMITED_PATHS = new Set(['/auth/pair/complete', '/auth/token']
  */
 export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
   const { store, adapter, feed } = rt
+  const resolveUrls = async () => {
+    const s = await store.getSettings()
+    const publicUrl = cleanHttpUrl(s.publicUrl) || appUrlOf(rt.config)
+    const ds = rt.deviceServer
+    const lan = ds?.listening ? lanUrl({ host: ds.host, port: ds.port }) : ''
+    return { publicUrl, lanUrl: lan, appUrl: publicUrl || lan, source: publicUrl ? 'public' : lan ? 'lan' : 'none' }
+  }
   const device = surface === 'device'
 
   const withAuth = async (request, next) => {
@@ -66,6 +75,18 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
       }
     }
 
+    if (sub === '/settings') {
+      if (method === 'GET') return json({ ok: true, ...(await resolveUrls()) })
+      if (method === 'POST') {
+        const body = await readJson(request)
+        const raw = String(body.publicUrl ?? '').trim()
+        const publicUrl = cleanHttpUrl(raw)
+        if (raw && !publicUrl) return error(400, '地址需以 http:// 或 https:// 开头')
+        await store.setSettings({ publicUrl })
+        return json({ ok: true, ...(await resolveUrls()) })
+      }
+    }
+
     if (method === 'GET' && sub === '/health') {
       return json({ ok: true, name: NAME, version: VERSION })
     }
@@ -81,6 +102,7 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
         expiresIn: pairing.expiresIn,
         devices,
         origin,
+        appUrl: (await resolveUrls()).appUrl,
       }))
     }
 
@@ -99,8 +121,11 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
       const pairing = await store.activePair()
       if (!pairing) return error(404, 'no active pairing code')
       const origin = originOf(request)
-      const payload = pairPayload(pairing.code, { origin, apiPrefix: API_PREFIX })
+      void origin
+      const urls = await resolveUrls()
+      const payload = pairPayload(pairing.code, { appUrl: urls.appUrl })
       return json({
+        ...urls,
         ok: true,
         code: pairing.code,
         expiresAt: pairing.expiresAt,
@@ -206,6 +231,7 @@ export function installRoutes(rt) {
     ['/stream', ['GET']],
     ['/devices', ['GET']],
     ['/devices/revoke', ['POST']],
+    ['/settings', ['GET', 'POST']],
   ]
 
   for (const [suffix, methods] of paths) {

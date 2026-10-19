@@ -236,12 +236,12 @@ function penalty(m) {
   return s
 }
 
-function buildMatrix(text) {
+export function buildMatrix(text) {
   let payload = String(text)
   let version = chooseVersion([...new TextEncoder().encode(payload)].length)
   if (version < 0) {
     // Fall back to bare code if deep-link is too long for V1–4
-    payload = payload.includes('code=') ? decodeURIComponent(payload.split('code=')[1].split('&')[0]) : payload.slice(0, 17)
+    payload = /^dshmb:[^@]+@/i.test(payload) ? payload.split('@')[0] : payload.includes('code=') ? decodeURIComponent(payload.split('code=')[1].split('&')[0]) : payload.slice(0, 17)
     version = chooseVersion([...new TextEncoder().encode(payload)].length)
     if (version < 0) throw new Error('payload too long for QR')
   }
@@ -278,11 +278,17 @@ function buildMatrix(text) {
   return { matrix: best, payload }
 }
 
-export function pairPayload(code, { origin = '', apiPrefix = '/api/mobile-bridge/v1' } = {}) {
-  // Keep short so Version ≤4 always works; phone types or scans the code.
-  void origin
-  void apiPrefix
-  return `dshmb:${String(code).trim()}`
+/** `dshmb:<code>@<appUrl>` (or legacy `dshmb:<code>` when no appUrl). Fits Version 4-M (≤62 bytes) for typical URLs. */
+export function fitsQr(text) {
+  return chooseVersion([...new TextEncoder().encode(String(text))].length) > 0
+}
+
+export function pairPayload(code, { appUrl = '' } = {}) {
+  const c = String(code).trim()
+  const u = String(appUrl || '').trim()
+  const full = u ? `dshmb:${c}@${u}` : `dshmb:${c}`
+  // URL too long for Version ≤4: fall back to legacy code-only payload (App keeps typed address).
+  return fitsQr(full) ? full : `dshmb:${c}`
 }
 
 export function qrSvg(text, { size = 180, margin = 2, dark = '#111827', light = '#ffffff' } = {}) {

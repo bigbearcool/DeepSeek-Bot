@@ -10,7 +10,7 @@ window.__ModuleLoader__.load({
 
     const API = '/api/mobile-bridge/v1'
     const LABEL = '手机配对'
-    const APP_URL = 'https://dshmb.bigbear.cool:8443'
+    const DEFAULT_APP_URL = ''
     const TTL_MS = 5 * 60 * 1000
 
     function formatCode(code) {
@@ -119,6 +119,7 @@ body[data-ds-dark-theme] .mb-pair-scrim{background:rgba(0,0,0,.5)}
       const [error, setError] = useState('')
       const [toast, setToast] = useState('')
       const toastTimer = useRef(null)
+      const [urlDraft, setUrlDraft] = useState(null)
       const dialogRef = useRef(null)
 
       const showToast = useCallback((msg) => {
@@ -147,6 +148,9 @@ body[data-ds-dark-theme] .mb-pair-scrim{background:rgba(0,0,0,.5)}
             code: body.code,
             expiresAt: body.expiresAt,
             payload: qrBody.payload || `dshmb:${body.code}`,
+            appUrl: qrBody.appUrl || DEFAULT_APP_URL,
+            publicUrl: qrBody.publicUrl || '',
+            lanUrl: qrBody.lanUrl || '',
             svg: qrBody.svg || '',
           })
           showToast('已生成新配对码')
@@ -171,6 +175,11 @@ body[data-ds-dark-theme] .mb-pair-scrim{background:rgba(0,0,0,.5)}
                 code: active.code,
                 expiresAt: active.expiresAt,
                 payload: qrBody.payload || `dshmb:${active.code}`,
+                appUrl: qrBody.appUrl || DEFAULT_APP_URL,
+                publicUrl: qrBody.publicUrl || '',
+                lanUrl: qrBody.lanUrl || '',
+            publicUrl: qrBody.publicUrl || '',
+            lanUrl: qrBody.lanUrl || '',
                 svg: qrBody.svg || '',
               })
               await loadDevices()
@@ -213,10 +222,32 @@ body[data-ds-dark-theme] .mb-pair-scrim{background:rgba(0,0,0,.5)}
 
       const copyUrl = async () => {
         try {
-          await navigator.clipboard.writeText(APP_URL)
+          await navigator.clipboard.writeText(pair.appUrl || DEFAULT_APP_URL)
           showToast('已复制服务器地址')
         } catch {
           showToast('复制失败')
+        }
+      }
+
+      const savePublicUrl = async () => {
+        try {
+          const res = await fetch(`${API}/settings`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ publicUrl: urlDraft ?? pair.publicUrl ?? '' }),
+          })
+          const body = await res.json()
+          if (!res.ok || !body.ok) throw new Error(body?.error?.message || '保存失败')
+          const qrBody = await fetch(`${API}/auth/pair/qr`).then(r => r.json()).catch(() => ({}))
+          setPair(p => ({
+            ...p,
+            appUrl: body.appUrl || '', publicUrl: body.publicUrl || '', lanUrl: body.lanUrl || '',
+            payload: qrBody.payload || p.payload, svg: qrBody.svg || p.svg,
+          }))
+          setUrlDraft(null)
+          showToast('已保存')
+        } catch (err) {
+          showToast(String(err.message || err))
         }
       }
 
@@ -266,7 +297,7 @@ body[data-ds-dark-theme] .mb-pair-scrim{background:rgba(0,0,0,.5)}
                 h('li', null, '打开手机上的 DS Bot App。'),
                 h('li', null,
                   '在 App 里填服务器地址：',
-                  h('code', null, APP_URL),
+                  h('code', null, pair.appUrl || '（未找到可用地址，请在下方填写公网访问地址）'),
                   ' ',
                   h('button', {
                     type: 'button',
@@ -275,6 +306,23 @@ body[data-ds-dark-theme] .mb-pair-scrim{background:rgba(0,0,0,.5)}
                   }, '复制地址'),
                 ),
                 h('li', null, '输入下面的 6 位配对码，或扫描二维码。'),
+              ),
+            ),
+            h('section', { className: 'mb-pair-steps', 'aria-label': '公网访问地址' },
+              h('strong', null, '公网访问地址'),
+              h('p', null, pair.lanUrl
+                ? `同一 Wi-Fi 下手机可直接用：${pair.lanUrl}。想在外面也能用，请填写公网访问地址（例如 https://你的域名:端口），不填就用局域网地址。`
+                : '想在外面也能用，请填写公网访问地址（例如 https://你的域名:端口）。'),
+              h('div', { className: 'mb-pair-row' },
+                h('input', {
+                  type: 'url',
+                  'data-mb-public-url': '1',
+                  placeholder: 'https://',
+                  value: urlDraft ?? pair.publicUrl ?? '',
+                  onChange: e => setUrlDraft(e.target.value),
+                  style: { flex: 1, minWidth: 0 },
+                }),
+                h('button', { type: 'button', onClick: () => { void savePublicUrl() } }, '保存'),
               ),
             ),
             h('section', { className: 'mb-pair-card' },

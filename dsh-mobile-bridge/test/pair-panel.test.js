@@ -53,8 +53,8 @@ test('assemblePairState merges begin + qr', () => {
 test('pairHowToSteps includes App server URL', () => {
   const steps = pairHowToSteps()
   assert.equal(steps.length, 3)
-  assert.ok(steps.some(s => s.includes(APP_SERVER_URL)))
-  assert.equal(APP_SERVER_URL, 'https://dshmb.bigbear.cool:8443')
+  assert.equal(APP_SERVER_URL, '')
+  assert.ok(pairHowToSteps('http://192.168.1.5:3081').some(s => s.includes('http://192.168.1.5:3081')))
 })
 
 test('pairEntrySpec requires in-app open, not window.open to /ui', () => {

@@ -10,8 +10,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const CLIENT = join(ROOT, 'client.js')
 const PKG = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
 
-test('package is 0.0.6 with web client + sidebar inject', () => {
-  assert.equal(PKG.version, '0.0.6')
+test('package is 0.0.7 with web client + sidebar inject', () => {
+  assert.equal(PKG.version, '0.0.7')
   assert.equal(PKG.exports['./client'], './client.js')
   assert.equal(PKG.dsh?.client?.platform, 'web')
   assert.ok(PKG.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-sidebar'))
@@ -27,7 +27,9 @@ test('client opens in-app panel — no window.open to /ui', () => {
   assert.match(source, /data-mb-pair-panel/)
   assert.match(source, /createPortal/)
   assert.match(source, /role:\s*['"]dialog['"]/)
-  assert.match(source, /https:\/\/dshmb\.bigbear\.cool:8443/)
+  assert.doesNotMatch(source, /dshmb\.bigbear\.cool/)
+  assert.match(source, /公网访问地址/)
+  assert.match(source, /\/settings/)
   assert.match(source, /auth\/pair\/begin/)
   assert.match(source, /auth\/pair\/qr/)
   assert.match(source, /devices\/revoke/)

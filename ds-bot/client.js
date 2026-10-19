@@ -5088,7 +5088,7 @@ function useRunningHost(active) {
     let frame = 0;
     const find = () => {
       frame = 0;
-      const node = document.querySelector("[data-chat-flow] > [data-chat-running]");
+      const node = document.querySelector("[data-chat-flow] [data-chat-running]");
       setHost((prev) => prev === node ? prev : node);
     };
     const observer = new MutationObserver(() => {

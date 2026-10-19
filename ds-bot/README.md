@@ -17,7 +17,10 @@ Tested with dsh `0.2.1-rc.2` (Web) and `0.2.0-rc.2` (Web and Desktop).
   full surface. Set it in the Bot's details panel or with `create_bot` /
   `update_bot`; an unknown or broken preset falls back to `standard`, and a change
   applies from the Bot's next new session on. Presets themselves are declared in the
-  profile's configuration, in DeepSeek Harness; Bots can only pick among them.
+  profile's configuration, in DeepSeek Harness; Bots can only pick among them. A
+  preset that drops tools standard mounts breaks the Bot's own tools and the group
+  relay, so declare per-Bot presets as full clones of the standard row and crop from
+  there — `dev/presets/researcher.patch.yml` and `coder.patch.yml` are ready-made.
 - **Bots work together**: `message_bot` sends a message to another Bot, `create_bot` and `update_bot` add and set up Bots, and `ask_user` asks you a question without blocking the other Bots.
 - **Group chats**: members speak one at a time, and each one reads the latest messages first. A message can `@Name` a member to pass the turn on; type `@` to pick one from a list. **+ → Reference a chat** adds another Bot's chat to a message as context, and in a group the members who answer get it. A member with nothing new to add stays quiet (`[PASS]`). Each member has its own hidden Session per group, so a group never reads a Bot's private chat.
 - **Roles and permissions**:

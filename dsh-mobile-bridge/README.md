@@ -2,11 +2,11 @@
 
 Mobile remote-control plugin for DeepSeek Harness (see `docs/plans/2026-10-20-mobile-native-dsh-bridge.md`).
 
-## What it does (0.0.5)
+## What it does (0.0.6)
 
 - Health check
-- **Host pairing UI** (`GET /ui`): one-time code, countdown, regenerate, QR (`dshmb:<code>`), paired-device list + kick
-- **Web 入口**：dsh 侧栏底部「手机配对」按钮（client 半边），一点即打开配对页；不用手输 URL
+- **Web 入口（应用内）**：dsh 侧栏底部「手机配对」一点即在应用内弹出配对面板（6 位码、倒计时、二维码、复制/重新生成、已配对设备）；**不再**新开标签跳到 `/ui`
+- **Host pairing UI**（后备）：`GET /ui` 仍保留独立 HTML 页，供直接打开；默认入口走应用内面板
 - Device pairing + short-lived access tokens
 - Read-only Bot list from ds-bot `state.json`
 - Chat history via `sessionController.page` (same part/cursor semantics as ds-bot `chatPage`, slim `displayItems` for phone)
@@ -37,15 +37,21 @@ Then `pnpm install` in the profile and start dsh as usual.
 
 ## Pairing (host UI)
 
-**推荐**：登录 dsh Web 后，在左侧栏底部点 **「手机配对」**，打开配对页。
+**推荐**：登录 dsh Web 后，在左侧栏底部点 **「手机配对」**。会在应用内直接弹出配对面板（不新开标签）：
 
-也可直接打开（需已登录 dsh）：
+- 大号 6 位配对码（约 5 分钟有效）+ 倒计时
+- 可扫二维码（`dshmb:<code>`）
+- 复制配对码 / 重新生成
+- 已配对设备列表（可取消配对）
+- App 服务器地址说明：`https://dshmb.bigbear.cool:8443`
+
+独立页仍可直接打开（需已登录 dsh，作后备）：
 
 `http://<本机或局域网>:port/api/mobile-bridge/v1/ui`
 
 （或 `/api/mobile-bridge/v1/pair`）
 
-配对页会显示 6 位码（约 5 分钟有效）、倒计时、复制、重新生成、二维码，以及已配对设备列表。页面上写明了 App 里应填的服务器地址（默认 `https://dshmb.bigbear.cool:8443`）。手机用 `POST /auth/pair/complete` 兑换配对码。
+手机用 `POST /auth/pair/complete` 兑换配对码。3081 设备口不提供 `/ui`。
 
 ## Routes
 

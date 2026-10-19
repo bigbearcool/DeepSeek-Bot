@@ -1,5 +1,5 @@
 export const NAME = 'dsh-mobile-bridge'
-export const VERSION = '0.0.5'
+export const VERSION = '0.0.6'
 export const API_PREFIX = '/api/mobile-bridge/v1'
 
 /** Access token lifetime (ms). */

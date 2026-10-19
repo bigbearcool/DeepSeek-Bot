@@ -91,7 +91,7 @@ test('health is open', async (t) => {
   const { status, body } = await h.json('GET', '/api/mobile-bridge/v1/health')
   assert.equal(status, 200)
   assert.equal(body.name, 'dsh-mobile-bridge')
-  assert.equal(body.version, '0.0.5')
+  assert.equal(body.version, '0.0.6')
   assert.equal(body.ok, true)
 })
 

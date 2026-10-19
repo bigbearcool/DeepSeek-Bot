@@ -1,0 +1,5 @@
+# Mobile remote-control bridge. Pair from the host, then call /api/mobile-bridge/v1/*
+# with a short-lived access token. Does not change Bot tools or permissions.
+- insert:
+    - id: mobile-bridge
+      name: dsh-mobile-bridge

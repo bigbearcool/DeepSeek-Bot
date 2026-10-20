@@ -21,7 +21,7 @@ Does **not** add remote-control / Mesh panels. Bot tools stay server-side.
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
-cd "/Users/xiangyu/开发项目/DeepSeek-Bot/dsh-mobile-android"
+cd dsh-mobile-android
 ./gradlew assembleDebug test
 ```
 

@@ -31,7 +31,7 @@ function matrixFromSvg(svg, n, size, margin = 2) {
 }
 
 const cases = [
-  pairPayload('ab12cd', { appUrl: 'https://dshmb.bigbear.cool:8443' }),
+  pairPayload('ab12cd', { appUrl: 'https://example.com:8443' }),
   pairPayload('0f9e8d', { appUrl: 'http://192.168.100.200:3081' }),
   pairPayload('ffffff', { appUrl: 'https://my-very-long-subdomain.example.com:8443' }),
   pairPayload('123abc'),

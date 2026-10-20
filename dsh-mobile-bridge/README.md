@@ -43,7 +43,7 @@ Then `pnpm install` in the profile and start dsh as usual.
 - 可扫二维码（`dshmb:<code>`）
 - 复制配对码 / 重新生成
 - 已配对设备列表（可取消配对）
-- App 服务器地址说明：`https://dshmb.bigbear.cool:8443`
+- App 服务器地址说明：`https://example.com:8443`
 
 独立页仍可直接打开（需已登录 dsh，作后备）：
 

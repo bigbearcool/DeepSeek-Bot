@@ -24,9 +24,9 @@ class PairCodeTest {
 
 class PairCodeV2Test {
     @Test fun newFormat() {
-        val p = PairCode.parse("dshmb:ABC123@https://dshmb.bigbear.cool:8443")!!
+        val p = PairCode.parse("dshmb:ABC123@https://example.com:8443")!!
         assertEquals("abc123", p.code)
-        assertEquals("https://dshmb.bigbear.cool:8443", p.baseUrl)
+        assertEquals("https://example.com:8443", p.baseUrl)
         assertEquals("abc123", PairCode.normalize("dshmb:abc123@http://10.0.0.2:3081/api/mobile-bridge/v1"))
     }
     @Test fun oldFormats() {

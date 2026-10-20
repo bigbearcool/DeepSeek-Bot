@@ -152,7 +152,8 @@ export struct CharAvatar {
     if (ch === null) {
       return;
     }
-    const k = this.dim / 100;
+    // The canvas draws in pixels; size the 100-unit character to the whole box.
+    const k = this.getUIContext().vp2px(this.dim) / 100;
     c.clearRect(0, 0, c.width, c.height);
     c.save();
     c.scale(k, k);

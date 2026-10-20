@@ -1176,11 +1176,11 @@ struct Index {
       if (c.kind === 'room') {
         RoomAvatar({
           ids: this.roomIds(c.id), shapes: this.roomIds(c.id).map((x: string) => this.botLook(x)[0]),
-          colors: this.roomIds(c.id).map((x: string) => this.botLook(x)[1]), dim: 48
+          colors: this.roomIds(c.id).map((x: string) => this.botLook(x)[1]), dim: 52
         })
       } else {
         CharAvatar({ botId: c.main ? '' : c.id, shape: c.main ? 'whale' : this.botLook(c.id)[0],
-          color: c.main ? 'deepseek' : (c.color ?? ''), dim: 48 })
+          color: c.main ? 'deepseek' : (c.color ?? ''), dim: 52 })
       }
       Column({ space: 4 }) {
         Row() {
@@ -1281,7 +1281,7 @@ struct Index {
             }
           }
         }
-        .divider({ strokeWidth: 0.5, color: $r('app.color.line'), startMargin: 72 })
+        .divider({ strokeWidth: 0.5, color: $r('app.color.line'), startMargin: 80 })
         .width('100%')
         .height('100%')
       }
@@ -1445,6 +1445,12 @@ struct Index {
     Column() {
       Row({ space: 8 }) {
         Text('‹').fontSize(30).fontColor($r('app.color.text')).padding({ right: 8 }).onClick(() => this.closeChat())
+        if (this.openKind === 'room') {
+          RoomAvatar({ ids: this.roomIds(this.openId), shapes: this.roomIds(this.openId).map((x: string) =>
+          this.botLook(x)[0]), colors: this.roomIds(this.openId).map((x: string) => this.botLook(x)[1]), dim: 28 })
+        } else {
+          CharAvatar({ botId: this.openId, shape: this.botLook(this.openId)[0], color: this.botLook(this.openId)[1], dim: 28 })
+        }
         Text(this.openName).fontSize(18).fontWeight(FontWeight.Medium).fontColor($r('app.color.text'))
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
         Text(this.isMuted(this.openKind, this.openId) ? '已静音' : '提醒').fontSize(13)
@@ -1570,9 +1576,9 @@ struct Index {
               Row({ space: 10 }) {
                 if (r.everyone) {
                   RoomAvatar({ ids: this.roomIds(this.openId), shapes: this.roomIds(this.openId).map((x: string) =>
-                  this.botLook(x)[0]), colors: this.roomIds(this.openId).map((x: string) => this.botLook(x)[1]), dim: 28 })
+                  this.botLook(x)[0]), colors: this.roomIds(this.openId).map((x: string) => this.botLook(x)[1]), dim: 30 })
                 } else {
-                  CharAvatar({ botId: r.id, shape: this.botLook(r.id)[0], color: this.botLook(r.id)[1], dim: 28 })
+                  CharAvatar({ botId: r.id, shape: this.botLook(r.id)[0], color: this.botLook(r.id)[1], dim: 30 })
                 }
                 Text(r.name).fontSize(15).fontColor($r('app.color.text'))
               }
@@ -1774,7 +1780,7 @@ struct Index {
             Row({ space: 12 }) {
               CharAvatar({ botId: this.profile.main ? '' : this.profile.id,
                 shape: this.profile.main ? 'whale' : (this.profile.shape ?? ''),
-                color: this.profile.main ? 'deepseek' : (this.profile.color ?? ''), dim: 56 })
+                color: this.profile.main ? 'deepseek' : (this.profile.color ?? ''), dim: 112 })
               Column() {
                 Text(this.profile.name).fontSize(20).fontWeight(FontWeight.Bold).fontColor($r('app.color.text'))
                 Text(this.profile.role).fontSize(14).fontColor($r('app.color.sub'))

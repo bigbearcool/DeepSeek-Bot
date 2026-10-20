@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { NAME, VERSION } from './src/constants.js'
 import { createStore } from './src/store.js'
 import { createDsBotAdapter } from './src/dsbot-adapter.js'
+import { createDsBotApi } from './src/dsbot-api.js'
 import { createLiveFeed } from './src/live-feed.js'
 import { installRoutes } from './src/routes.js'
 import { startDeviceServer } from './src/device-server.js'
@@ -33,6 +34,7 @@ export function createRuntime(ctx, config = {}) {
     store: createStore({ home }),
     adapter,
     feed,
+    dsbot: createDsBotApi({ ctx }),
   }
   installRoutes(rt)
   // devicePort: false disables the standalone device listener.

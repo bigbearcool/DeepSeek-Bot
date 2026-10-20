@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { displayItems, partsOfBot } from './chat-format.js'
+import { displayItems, partsOfBot, roomItems } from './chat-format.js'
 
 const HISTORY_TIMEOUT_MS = 20_000
 const PAGE_SIZE = 60
@@ -33,6 +33,7 @@ export function createDsBotAdapter({ dshHome, botHome, ctx, logger = console } =
         available: false,
         reason: 'ds-bot state.json not found; is ds-bot installed and opened once?',
         bots: [],
+        rooms: [],
         mainBotIds: [],
         revision: null,
       }
@@ -44,15 +45,59 @@ export function createDsBotAdapter({ dshHome, botHome, ctx, logger = console } =
       sessionId: bot.sessionId ?? bot.id,
       model: bot.model ?? null,
       agentPreset: bot.agentPreset ?? null,
+      color: bot.color ?? null,
+      shape: bot.avatar?.shape ?? null,
       main: Array.isArray(state.mainBotIds) && state.mainBotIds.includes(bot.id),
     }))
+    const rooms = Object.values(state.rooms ?? {}).filter(room => room?.id && room.hidden !== true).map(room => roomView(state, room))
     return {
       available: true,
       bots,
+      rooms,
       mainBotIds: state.mainBotIds ?? [],
       revision: state.revision ?? null,
       statePath,
     }
+  }
+
+  function roomView(state, room) {
+    const last = (room.log ?? []).filter(line => line.kind === undefined).at(-1)
+    const names = (room.members ?? []).map(id => state.bots?.[id]?.name).filter(Boolean)
+    return {
+      id: room.id,
+      name: room.name ?? '',
+      members: room.members ?? [],
+      memberNames: names,
+      admin: room.admin ?? null,
+      mode: room.mode ?? null,
+      createdAt: room.createdAt ?? null,
+      ...(last ? { preview: last.who === 'User' ? last.text : `${last.who}：${last.text}` } : {}),
+    }
+  }
+
+  /** Map hidden member Session id → { roomId, botId } (room.sessions), for live replies. */
+  async function groupOwners() {
+    const state = await readState()
+    const map = new Map()
+    for (const room of Object.values(state?.rooms ?? {})) {
+      for (const [botId, sessionId] of Object.entries(room?.sessions ?? {})) {
+        map.set(sessionId, { roomId: room.id, botId, name: state.bots?.[botId]?.name ?? null })
+      }
+    }
+    return map
+  }
+
+  /** Latest lines of a group chat (ds-bot keeps the last 60 in state.json). */
+  async function roomHistory({ roomId } = {}) {
+    const state = await readState()
+    if (state === null) return { available: false, roomId, items: [], seq: null, reason: 'ds-bot state.json not found' }
+    const room = state.rooms?.[roomId]
+    if (!room) {
+      const err = new Error('unknown group chat')
+      err.status = 404
+      throw err
+    }
+    return { available: true, roomId, room: roomView(state, room), items: roomItems(room.log), seq: room.seq ?? null }
   }
 
   /** Map sessionId → botId for own chats (current + earlier segments). */
@@ -203,5 +248,5 @@ export function createDsBotAdapter({ dshHome, botHome, ctx, logger = console } =
     }
   }
 
-  return { statePath, team, history, send, chatOwners, readState }
+  return { statePath, team, history, send, chatOwners, groupOwners, roomHistory, readState }
 }

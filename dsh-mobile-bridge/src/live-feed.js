@@ -1,8 +1,10 @@
-import { displayItems } from './chat-format.js'
+import { displayItems, roomItem } from './chat-format.js'
 
 const KEEPALIVE_MS = 20_000
 const LIVE_DELAY_MS = 150
 const MAX_QUEUED = 512
+/** How often group chat logs are checked while a phone has a group chat open. */
+export const ROOM_POLL_MS = 1000
 const encoder = new TextEncoder()
 
 /**
@@ -22,11 +24,22 @@ export function createLiveFeed({ ctx, adapter }) {
     try { entry.controller.enqueue(chunk) } catch { clients.delete(entry) }
   }
 
+  /**
+   * Filtering: a phone watching a group chat (roomId) gets only that group's events; a
+   * phone watching a Bot gets only that Bot's own-chat events (never group events, whose
+   * botId names the member speaking). An unfiltered stream gets everything.
+   */
   const publish = (event, data, { botId } = {}) => {
     const chunk = encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+    const roomId = data?.roomId ?? null
     for (const entry of clients) {
-      if (entry.botId && botId && entry.botId !== botId) continue
-      if (entry.botId && data?.botId && entry.botId !== data.botId) continue
+      if (entry.roomId) {
+        if (roomId !== entry.roomId) continue
+      } else if (entry.botId) {
+        if (roomId) continue
+        if (botId && entry.botId !== botId) continue
+        if (data?.botId && entry.botId !== data.botId) continue
+      }
       send(entry, chunk)
     }
   }
@@ -110,21 +123,88 @@ export function createLiveFeed({ ctx, adapter }) {
     })
   }
 
-  function openStream(request, { device, botId = null, test = false } = {}) {
+  // ---- group chats ----
+  /** roomId → last log seq already published. */
+  const roomSeen = new Map()
+  let roomTimer
+  const roomClients = () => [...clients].filter(e => e.roomId).length
+  async function checkRooms() {
+    const watched = new Set([...clients].map(e => e.roomId).filter(Boolean))
+    if (watched.size === 0) return
+    let state
+    try { state = await adapter.readState() } catch { return }
+    for (const roomId of watched) {
+      const room = state?.rooms?.[roomId]
+      if (!room) continue
+      const seen = roomSeen.get(roomId)
+      const log = Array.isArray(room.log) ? room.log : []
+      if (seen === undefined) {
+        roomSeen.set(roomId, room.seq ?? log.at(-1)?.seq ?? 0)
+        continue
+      }
+      for (const line of log) {
+        if (!(line.seq > seen)) continue
+        const item = roomItem(line)
+        if (item) publish('message', { roomId, item: claimPending(`room:${roomId}`, item) })
+      }
+      roomSeen.set(roomId, Math.max(seen, room.seq ?? 0, log.at(-1)?.seq ?? 0))
+    }
+  }
+  const startRoomPoll = () => {
+    if (roomTimer) return
+    roomTimer = setInterval(() => { void checkRooms() }, ROOM_POLL_MS)
+    roomTimer.unref?.()
+  }
+  const stopRoomPollIfIdle = () => {
+    if (roomClients() > 0 || !roomTimer) return
+    clearInterval(roomTimer)
+    roomTimer = undefined
+    roomSeen.clear()
+  }
+
+  // A member writing its reply in its hidden group Session streams into the group chat.
+  const roomWriting = new Map()
+  if (typeof ctx.on === 'function') {
+    ctx.on('agent/assistant-stream', async ({ agent, frame }) => {
+      if (roomClients() === 0) return
+      if (frame.type === 'start') {
+        const owner = (await adapter.groupOwners?.())?.get(agent.id)
+        if (!owner) return
+        roomWriting.set(frame.attemptId, owner)
+        publish('stream', { roomId: owner.roomId, botId: owner.botId, name: owner.name, attemptId: frame.attemptId, phase: 'start' })
+        return
+      }
+      const owner = roomWriting.get(frame.attemptId)
+      if (!owner) return
+      const base = { roomId: owner.roomId, botId: owner.botId, name: owner.name, attemptId: frame.attemptId }
+      if (frame.type === 'chunk' && frame.chunk?.type === 'text-delta') publish('stream', { ...base, text: frame.chunk.text })
+      else if (frame.type === 'end') {
+        roomWriting.delete(frame.attemptId)
+        publish('stream', { ...base, phase: 'end' })
+        void checkRooms()
+      }
+    })
+  }
+
+  function openStream(request, { device, botId = null, roomId = null, test = false } = {}) {
     let entry
     let tick
     let keepalive
     const body = new ReadableStream({
       async start(controller) {
-        entry = { controller, botId, test }
+        entry = { controller, botId, roomId, test }
         clients.add(entry)
+        if (roomId) {
+          startRoomPoll()
+          void checkRooms()
+        }
         let revision = null
         try {
           const state = await adapter.readState()
           revision = state?.revision ?? null
         } catch { /* */ }
         controller.enqueue(encoder.encode(
-          `event: hello\ndata: ${JSON.stringify({ deviceId: device.id, botId, mode: test ? 'test' : 'live', revision })}\n\n`,
+          `event: hello\ndata: ${JSON.stringify({ deviceId: device.id, botId, roomId, mode: test ? 'test' : 'live', revision })}\n\n`,
         ))
         keepalive = setInterval(() => {
           try { controller.enqueue(encoder.encode(': keepalive\n\n')) } catch { /* */ }
@@ -143,12 +223,14 @@ export function createLiveFeed({ ctx, adapter }) {
         clearInterval(keepalive)
         clearInterval(tick)
         if (entry) clients.delete(entry)
+        stopRoomPollIfIdle()
       },
     })
     request.signal.addEventListener('abort', () => {
       clearInterval(keepalive)
       clearInterval(tick)
       if (entry) leave(entry)
+      stopRoomPollIfIdle()
     }, { once: true })
     return new Response(body, {
       status: 200,
@@ -159,5 +241,5 @@ export function createLiveFeed({ ctx, adapter }) {
     })
   }
 
-  return { openStream, publish, notePending, claimPending, clientCount: () => clients.size }
+  return { openStream, publish, notePending, claimPending, checkRooms, clientCount: () => clients.size }
 }

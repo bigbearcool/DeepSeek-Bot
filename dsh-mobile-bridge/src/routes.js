@@ -1,4 +1,6 @@
-import { API_PREFIX, NAME, VERSION, appUrlOf, cleanHttpUrl } from './constants.js'
+import { API_PREFIX, AVATAR_SHAPES, FORM_LIMITS, INK_HEX, NAME, VERSION, appUrlOf, cleanHttpUrl } from './constants.js'
+import { DsBotError } from './dsbot-api.js'
+import { zhMessage } from './messages-zh.js'
 import { lanUrl } from './lan.js'
 import { bearer, error, html, json, pathOf, readJson } from './http.js'
 import { pairPageHtml } from './pair-page.js'
@@ -14,6 +16,51 @@ export const DEVICE_PUBLIC_PATHS = new Set(['/health', '/auth/pair/complete', '/
 export const SEND_DEDUPE_MS = 10 * 60_000
 export const RATE_LIMITED_PATHS = new Set(['/auth/pair/complete', '/auth/token'])
 
+const str = v => (typeof v === 'string' ? v : undefined)
+
+/** Exactly the fields ds-bot's create-bot endpoint reads; ds-bot validates every one. */
+export function createBotPayload(body = {}) {
+  const out = {}
+  for (const key of ['name', 'role', 'color', 'model', 'effort', 'agentPreset', 'workDir', 'instructions', 'brief']) {
+    const value = str(body[key])
+    if (value !== undefined && value.trim() !== '') out[key] = value
+  }
+  if (body.avatar && typeof body.avatar === 'object') {
+    const avatar = {}
+    if (str(body.avatar.shape)) avatar.shape = body.avatar.shape
+    if (str(body.avatar.image)) avatar.image = body.avatar.image
+    if (Object.keys(avatar).length > 0) out.avatar = avatar
+  }
+  return out
+}
+
+/** Same call the desktop "new group chat" form makes: admin first, greet on. */
+export function createRoomPayload(body = {}) {
+  const ids = Array.isArray(body.members) ? body.members.filter(id => typeof id === 'string') : []
+  const admin = str(body.admin)
+  const members = admin ? [admin, ...ids.filter(id => id !== admin)] : ids
+  const name = str(body.name)?.trim()
+  return { members, ...(admin ? { admin } : {}), greet: true, ...(name ? { name } : {}) }
+}
+
+function publicBot(bot = {}) {
+  return {
+    id: bot.id, name: bot.name, role: bot.role ?? null, sessionId: bot.sessionId ?? bot.id,
+    model: bot.model ?? null, agentPreset: bot.agentPreset ?? null, color: bot.color ?? null,
+    shape: bot.avatar?.shape ?? null, main: false,
+  }
+}
+
+async function dsCall(run) {
+  try {
+    return json(await run())
+  } catch (err) {
+    const zh = zhMessage(err?.message)
+    if (err instanceof DsBotError) return error(err.status, err.message, { code: err.code, ...(zh ? { zh } : {}) })
+    return error(err?.status ?? 500, err?.message ?? String(err), zh ? { zh } : {})
+  }
+}
+
 /**
  * Build the request handler.
  * surface 'web'    — dsh connection routes (3080, protected by dsh login).
@@ -21,7 +68,7 @@ export const RATE_LIMITED_PATHS = new Set(['/auth/pair/complete', '/auth/token']
  *                    DEVICE_PUBLIC_PATHS, pair/complete + token rate-limited by client IP.
  */
 export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
-  const { store, adapter, feed } = rt
+  const { store, adapter, feed, dsbot } = rt
   const resolveUrls = async () => {
     const s = await store.getSettings()
     const publicUrl = cleanHttpUrl(s.publicUrl) || appUrlOf(rt.config)
@@ -197,13 +244,116 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
       })
     }
 
+    if (method === 'GET' && sub === '/bots/options') {
+      return withAuth(request, async () => dsCall(async () => {
+        await dsbot.call('models').catch(() => {})
+        const view = await dsbot.call('state', {})
+        let folders = null
+        try { folders = await dsbot.call('folders', {}) } catch { /* optional */ }
+        const colors = Array.isArray(view.colors) ? view.colors : []
+        return {
+          ok: true,
+          models: (view.models ?? []).map(m => ({
+            ref: m.ref, name: m.name ?? m.id ?? m.ref, providerName: m.providerName ?? m.provider ?? null,
+            ...(m.needsKey ? { needsKey: true } : {}),
+          })),
+          defaultModel: view.defaultModel ?? null,
+          agentPresets: Array.isArray(view.agentPresets)
+            ? view.agentPresets.filter(p => !p.broken).map(p => ({ value: p.value, name: p.name ?? p.value }))
+            : null,
+          colors: colors.map(id => ({ id, hex: INK_HEX[id] ?? null })),
+          shapes: AVATAR_SHAPES,
+          folders,
+          limits: FORM_LIMITS,
+          readOnly: view.readOnly ?? null,
+        }
+      }))
+    }
+
+    if (method === 'GET' && sub === '/bots/efforts') {
+      return withAuth(request, async () => dsCall(async () => {
+        const ref = new URL(request.url).searchParams.get('ref') ?? ''
+        if (!ref) return { ok: true, efforts: [] }
+        const value = await dsbot.call('efforts', { ref })
+        return { ok: true, efforts: value?.efforts ?? [], defaultEffort: value?.defaultEffort ?? null }
+      }))
+    }
+
+    if (method === 'GET' && sub === '/folders') {
+      return withAuth(request, async () => dsCall(async () => {
+        const path = new URL(request.url).searchParams.get('path')
+        if (path === null) return { ok: true, ...(await dsbot.call('folders', {})) }
+        return { ok: true, ...(await dsbot.call('folder-list', { path })) }
+      }))
+    }
+
+    if (method === 'POST' && sub === '/bots/create') {
+      return withAuth(request, async () => dsCall(async () => {
+        const body = await readJson(request)
+        const bot = await dsbot.call('create-bot', createBotPayload(body))
+        return { ok: true, bot: publicBot(bot) }
+      }))
+    }
+
+    if (method === 'POST' && sub === '/rooms/create') {
+      return withAuth(request, async () => dsCall(async () => {
+        const body = await readJson(request)
+        const room = await dsbot.call('create-room', createRoomPayload(body))
+        return { ok: true, room: { id: room.id, name: room.name, members: room.members ?? [], admin: room.admin ?? null, mode: room.mode ?? null } }
+      }))
+    }
+
+    if (method === 'GET' && sub === '/rooms/history') {
+      return withAuth(request, async () => {
+        const roomId = new URL(request.url).searchParams.get('roomId') ?? ''
+        if (!roomId) return error(400, 'roomId required')
+        try {
+          return json({ ok: true, ...(await adapter.roomHistory({ roomId })) })
+        } catch (err) {
+          return error(err.status ?? 500, err.message, { zh: zhMessage(err.message) ?? undefined })
+        }
+      })
+    }
+
+    if (method === 'POST' && sub === '/rooms/send') {
+      return withAuth(request, async (device) => {
+        const body = await readJson(request)
+        const roomId = typeof body.roomId === 'string' ? body.roomId : ''
+        const text = String(body.text ?? '').trim()
+        if (!roomId) return error(400, 'roomId required')
+        if (!text) return error(400, 'text required')
+        const clientMessageId = typeof body.clientMessageId === 'string' && body.clientMessageId.length <= 128
+          ? body.clientMessageId : null
+        const key = clientMessageId ? `${device.id}:room:${clientMessageId}` : null
+        const seen = key ? recentSends.get(key) : undefined
+        if (seen) return json({ ...seen, duplicate: true })
+        try {
+          // Only rooms ds-bot knows: a bot id or a plain Session id is not a group chat.
+          await adapter.roomHistory({ roomId })
+        } catch (err) {
+          return error(err.status ?? 500, err.message)
+        }
+        return dsCall(async () => {
+          await dsbot.call('send', { sessionId: roomId, text })
+          const out = { ok: true, roomId, ...(clientMessageId ? { clientMessageId } : {}) }
+          if (key) {
+            recentSends.set(key, out)
+            setTimeout(() => recentSends.delete(key), SEND_DEDUPE_MS).unref?.()
+            feed.notePending?.(`room:${roomId}`, text, clientMessageId)
+          }
+          return out
+        })
+      })
+    }
+
     if (method === 'GET' && sub === '/stream') {
       return withAuth(request, async (device) => {
         const url = new URL(request.url)
         const botId = url.searchParams.get('botId') || null
+        const roomId = url.searchParams.get('roomId') || null
         // Default: live feed from session/agent events. ?mode=test keeps hello+test ticks.
         const test = url.searchParams.get('mode') === 'test'
-        return feed.openStream(request, { device, botId, test })
+        return feed.openStream(request, { device, botId, roomId, test })
       })
     }
 
@@ -242,6 +392,13 @@ export function installRoutes(rt) {
     ['/team', ['GET']],
     ['/chats/history', ['GET']],
     ['/chats/send', ['POST']],
+    ['/bots/options', ['GET']],
+    ['/bots/efforts', ['GET']],
+    ['/bots/create', ['POST']],
+    ['/folders', ['GET']],
+    ['/rooms/create', ['POST']],
+    ['/rooms/history', ['GET']],
+    ['/rooms/send', ['POST']],
     ['/stream', ['GET']],
     ['/devices', ['GET']],
     ['/devices/revoke', ['POST']],

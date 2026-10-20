@@ -1,5 +1,5 @@
 export const NAME = 'dsh-mobile-bridge'
-export const VERSION = '0.0.8'
+export const VERSION = '0.0.9'
 export const API_PREFIX = '/api/mobile-bridge/v1'
 
 /** Access token lifetime (ms). */
@@ -31,3 +31,23 @@ export function cleanHttpUrl(value) {
 export function appUrlOf(config = {}) {
   return cleanHttpUrl(config?.publicUrl) || APP_SERVER_URL
 }
+
+/**
+ * ds-bot's avatar characters (src/client/characters.js PICKER_SHAPES, ds-bot 0.1.9) with
+ * the labels the phone shows. ds-bot itself validates any shape it is sent (cleanAvatar).
+ */
+export const AVATAR_SHAPES = [
+  ['star', '星星'], ['moon', '月亮'], ['gumdrop', '软糖'], ['peanut', '花生'], ['bunny', '兔子'],
+  ['kitty', '小猫'], ['acorn', '橡果'], ['whale', '鲸鱼'], ['wave', '浪花'], ['squircle', '圆方'],
+  ['zed', '小牛'], ['hex', '花朵'], ['saucer', '飞碟'], ['beacon', '灯塔'], ['plus', '十字'],
+  ['magnet', '磁铁'], ['pebbles', '石子'], ['cushion', '靠垫'], ['ring', '圆环'], ['gem', '宝石'],
+].map(([id, label]) => ({ id, label }))
+/** ds-bot inks (src/client/inks.js): first value is the color drawn in light mode. */
+export const INK_HEX = {
+  deepseek: '#4D6BFE', charcoal: '#141416', graphite: '#2D2D2D', rose: '#EC2F6B', sky: '#0AA8D6',
+  tangerine: '#FF6900', cobalt: '#082DFF', black: '#000000', brown: '#A27952', red: '#FF3E51',
+  orange: '#FF781C', yellow: '#FFAF38', green: '#00C972', cyan: '#1CC3B0', blue: '#2A92FE',
+  violet: '#A97EFE', magenta: '#FF5EB1', gray: '#959595', aurora: '#00B8D4',
+}
+/** Limits the desktop form shows (create-bot.js maxLength 40, roster.js role 24, ROOM_NAME_MAX 60). */
+export const FORM_LIMITS = { name: 40, role: 24, roomName: 60, roomMinMembers: 2, roomMaxMembers: 12 }

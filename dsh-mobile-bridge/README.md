@@ -120,3 +120,22 @@ mobile.example.com {
 - 「手机配对」弹窗可填写并保存「公网访问地址」（仅 dsh 登录的网页端可改）。填了用于二维码；没填就用自动探测的局域网地址 `http://<局域网IP>:<端口>`。
 - 二维码：`dshmb:<code>@<地址>`；地址太长放不进二维码时退回 `dshmb:<code>`。
 - 反代在另一台机器时，把那台机器的 IP 加进 `trustedProxies`，否则限频按反代 IP 计数。
+
+## 0.0.9 — group chats, new Bot, new group chat (device token required)
+
+All writes go through ds-bot's own `POST /api/bot` handler in-process (found in dsh's
+connection `fetchRoutes`), so ds-bot validates exactly as on the desktop:
+
+| Device endpoint | ds-bot endpoint / source |
+| --- | --- |
+| `GET /team` (now with `rooms`) | ds-bot `state.json` (rooms, hidden ones left out) |
+| `GET /rooms/history?roomId=` | `state.json` `rooms[id].log` (ds-bot keeps the last 60) |
+| `POST /rooms/send` | `send` with the group's Session id |
+| `GET /stream?roomId=` | group log lines + members' `agent/assistant-stream` from `rooms[id].sessions` |
+| `GET /bots/options` | `models` + `state` (models, defaultModel, agentPresets, colors) + `folders` |
+| `GET /bots/efforts?ref=` | `efforts` |
+| `GET /folders[?path=]` | `folders` / `folder-list` |
+| `POST /bots/create` | `create-bot` (name, role, color, avatar{shape,image}, model, effort, agentPreset, workDir, instructions, brief) |
+| `POST /rooms/create` | `create-room` (admin first, `greet: true`, optional name) — same as the desktop form |
+
+Only these ds-bot endpoints are reachable (`DSBOT_ALLOWED`); without ds-bot loaded they answer 503.

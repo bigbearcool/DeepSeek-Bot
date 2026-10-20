@@ -1,4 +1,4 @@
-export function fakeContext({ services = {} } = {}) {
+export function fakeContext({ services = {}, fetchRoutes } = {}) {
   const calls = []
   const routes = []
   const disposers = []
@@ -32,6 +32,7 @@ export function fakeContext({ services = {} } = {}) {
       return Promise.allSettled(disposers.splice(0).reverse().map(d => d()))
     },
     connection: {
+      ...(fetchRoutes ? { fetchRoutes } : {}),
       fetch: {
         register(route) {
           calls.push(`route ${route.methods.join(',')} ${route.path}`)

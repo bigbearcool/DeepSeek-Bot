@@ -81,3 +81,34 @@ export function partsOfBot(state, botId) {
   })
   return parts
 }
+
+const ROOM_EVENT_KINDS = new Set(['lookup', 'resumed', 'cut', 'stopped', 'done'])
+
+/**
+ * One line of a ds-bot group chat log (state.rooms[id].log) as a mobile chat item.
+ * Same reading as ds-bot groups.js: who 'User' is the user, a line without a kind is a
+ * member's message, the other kinds are events of the round.
+ */
+export function roomItem(line) {
+  if (!line || typeof line !== 'object') return null
+  const seq = Number.isFinite(line.seq) ? line.seq : undefined
+  if (line.kind === undefined) {
+    if (line.who === 'User' && !line.botId) return { kind: 'user', text: String(line.text ?? ''), seq }
+    return {
+      kind: 'member',
+      botId: line.botId ?? null,
+      name: line.who ?? null,
+      text: String(line.text ?? ''),
+      seq,
+      ...(Number.isFinite(line.length) ? { cut: true } : {}),
+    }
+  }
+  if (ROOM_EVENT_KINDS.has(line.kind)) {
+    return { kind: 'event', role: line.kind, botId: line.botId ?? null, name: line.who ?? null, seq }
+  }
+  return null
+}
+
+export function roomItems(log) {
+  return (Array.isArray(log) ? log : []).map(roomItem).filter(Boolean)
+}

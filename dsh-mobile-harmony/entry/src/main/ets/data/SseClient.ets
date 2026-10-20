@@ -8,6 +8,16 @@ export class SseClient {
   private closed: boolean = false;
 
   open(url: string, token: string, onEvent: (e: SseEvent) => void, onClose: (code: number) => void): void {
+    // Drop any previous connection first so each delta is applied once.
+    this.closed = true;
+    if (this.req !== null) {
+      try {
+        this.req.off('dataReceive');
+        this.req.destroy();
+      } catch (e) {
+      }
+      this.req = null;
+    }
     this.closed = false;
     const req = http.createHttp();
     this.req = req;

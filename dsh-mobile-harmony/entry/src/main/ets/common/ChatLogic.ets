@@ -98,6 +98,27 @@ export class WaitState {
   }
 }
 
+/** Merge one stream update: append a delta, or replace when the computer sends the full text so far. */
+export class StreamText {
+  static merge(prev: string, incoming: string): string {
+    if (incoming.length === 0) {
+      return prev;
+    }
+    if (prev.length === 0) {
+      return incoming;
+    }
+    // Full text so far (snapshot): replace, do not append on top of itself.
+    if (incoming === prev || incoming.startsWith(prev)) {
+      return incoming;
+    }
+    // Older snapshot arriving late.
+    if (prev.startsWith(incoming)) {
+      return prev;
+    }
+    return prev + incoming;
+  }
+}
+
 export enum WaitKind { Submitted, SendFailed, StreamStart, Delta, StreamEnd, BotMessage, Dismiss }
 
 export class WaitEvent {
@@ -121,7 +142,7 @@ export class WaitMachine {
         return WaitState.of(WaitPhase.Streaming, '', '', s.clientMessageId);
       case WaitKind.Delta:
         if (s.phase === WaitPhase.Streaming) {
-          return WaitState.of(WaitPhase.Streaming, s.text + e.value, '', s.clientMessageId);
+          return WaitState.of(WaitPhase.Streaming, StreamText.merge(s.text, e.value), '', s.clientMessageId);
         }
         return WaitState.of(WaitPhase.Streaming, e.value, '', s.clientMessageId);
       case WaitKind.StreamEnd:

@@ -1,4 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
+import { StreamText } from '../main/ets/common/ChatLogic';
 import { BotRules, LiveReply, Mentions, MentionRow, RoomRound, RoomRules, RoomStreams } from '../main/ets/common/Group';
 import { BotInfo, NewRoomDraft, newItem } from '../main/ets/common/Models';
 

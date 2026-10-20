@@ -556,6 +556,7 @@ struct Index {
     if (this.auth === null || this.screen !== 'chat') {
       return;
     }
+    this.sse.close();
     const kind = this.openKind;
     const id = this.openId;
     try {
@@ -1518,7 +1519,7 @@ struct Index {
             .alignItems(HorizontalAlign.Start)
             .width('100%')
           }
-        }, (x: LiveReply) => x.attemptId + ':' + x.text.length + ':' + x.endedAt)
+        }, (x: LiveReply) => x.attemptId)
         if (this.wait.phase === WaitPhase.Streaming && this.wait.text.length > 0) {
           ListItem() {
             Column() {

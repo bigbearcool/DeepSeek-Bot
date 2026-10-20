@@ -1,4 +1,5 @@
 import { BotInfo, BotOptions, ChatItem, NewRoomDraft, newItem } from './Models';
+import { StreamText } from './ChatLogic';
 
 export class MentionActive {
   atIndex: number;
@@ -207,6 +208,10 @@ export class RoomStreams {
     return t;
   }
 
+  static mergeText(prev: string, incoming: string): string {
+    return StreamText.merge(prev, incoming);
+  }
+
   static start(list: LiveReply[], attemptId: string, botId: string | null, name: string | null): LiveReply[] {
     return list.filter((x: LiveReply) => x.attemptId !== attemptId).concat([new LiveReply(attemptId, botId, name)]);
   }
@@ -216,7 +221,7 @@ export class RoomStreams {
       return list.concat([new LiveReply(attemptId, botId, name, text)]);
     }
     return list.map((x: LiveReply) => x.attemptId === attemptId ?
-      new LiveReply(x.attemptId, x.botId, x.name, x.text + text, x.endedAt) : x);
+      new LiveReply(x.attemptId, x.botId, x.name, RoomStreams.mergeText(x.text, text), x.endedAt) : x);
   }
 
   static end(list: LiveReply[], attemptId: string, now: number): LiveReply[] {

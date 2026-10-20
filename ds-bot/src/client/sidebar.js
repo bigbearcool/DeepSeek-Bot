@@ -381,8 +381,8 @@ function UpdateButton({ useUpdate, actions }) {
                 }, dshPhase === 'installing' ? t('Updating…') : dshPhase === 'failed' ? t('Try again') : t('Update')))) : null), document.body) : null)
 }
 
-// The footer entry to the shell's plugin panel, marked as not yet adapted: the red
-// badge and a hover tip explain that plugin support lands step by step.
+// The footer entry to the shell's plugin panel. A hover tip notes that plugin
+// compatibility is not fully verified (the old always-on red badge was removed).
 export function ConnectPlugins({ wide, actions }) {
   const tipId = useId()
   const [tip, setTip] = useState(false)
@@ -408,7 +408,7 @@ export function ConnectPlugins({ wide, actions }) {
       onMouseEnter: show, onMouseLeave: hide, onFocus: show, onBlur: hide,
       onClick: () => actions.selectPanel('plugins'),
     },
-    h(PlugIcon), t('Connect plugins'), h('span', { className: 'bt-connect-warn', 'aria-hidden': true }, '!')),
+    h(PlugIcon), t('Connect plugins')),
     tip && box ? createPortal(h('span', { role: 'tooltip', id: tipId, className: 'bt-connect-tip', style: box },
       t('Plugin compatibility is not fully verified.')), document.body) : null)
 }

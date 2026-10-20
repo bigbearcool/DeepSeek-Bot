@@ -56,6 +56,27 @@ export default function batch2Test() {
       expect(RoomStreams.shown(new LiveReply('1', 'a', '甲', '[PA'))).assertNull();
       expect(RoomStreams.shown(new LiveReply('1', 'a', '甲', '甲：你好'))).assertEqual('你好');
     });
+    it('streamMergeDeltaAndSnapshot', 0, () => {
+      expect(StreamText.merge('', '在')).assertEqual('在');
+      expect(StreamText.merge('在', '，大')).assertEqual('在，大');
+      expect(StreamText.merge('在，大', '熊')).assertEqual('在，大熊');
+      expect(StreamText.merge('在', '在，大')).assertEqual('在，大');
+      expect(StreamText.merge('在，大', '在，大熊')).assertEqual('在，大熊');
+      expect(StreamText.merge('在，大熊', '在，大熊，参谋在线。')).assertEqual('在，大熊，参谋在线。');
+      expect(StreamText.merge('在，大', '在，大')).assertEqual('在，大');
+      expect(StreamText.merge('在，大熊，参谋在线。', '在')).assertEqual('在，大熊，参谋在线。');
+      let l = RoomStreams.start([], 'a', 'b', '参谋');
+      l = RoomStreams.delta(l, 'a', '在', null, null);
+      l = RoomStreams.delta(l, 'a', '，大', null, null);
+      expect(l[0].text).assertEqual('在，大');
+      l = RoomStreams.delta(l, 'a', '在，大熊', null, null);
+      expect(l[0].text).assertEqual('在，大熊');
+      l = RoomStreams.delta(l, 'a', '在，大熊，参谋在线。', null, null);
+      expect(l[0].text).assertEqual('在，大熊，参谋在线。');
+      l = RoomStreams.delta(l, 'a', '在，大熊，参谋在线。', null, null);
+      expect(l[0].text).assertEqual('在，大熊，参谋在线。');
+    });
+
     it('startDeltaEnd', 0, () => {
       let l = RoomStreams.start([], 'x', 'a', '甲');
       l = RoomStreams.delta(l, 'x', '你', null, null);

@@ -15,7 +15,12 @@ import {
 import {
   ChatListLogic, ChatMerge, LaunchRouter, Look, StartRoute, WaitEvent, WaitKind, WaitMachine, WaitPhase, WaitState
 } from '../common/ChatLogic';
-import { AttImage, Avatar, MdText, colorOf } from '../view/Bits';
+import { AttImage, CharAvatar, ImageViewer, MdText, RoomAvatar } from '../view/Bits';
+import { COLOR_LABELS, Exchanges, ExRun, ListPrefs, Looks, PICKER_COLORS, SHAPE_LABELS } from '../common/Look';
+import { FolderListing, FolderOption, NamedOption } from '../common/Models';
+import { ConfigurationConstant } from '@kit.AbilityKit';
+import { pasteboard } from '@kit.BasicServicesKit';
+import { promptAction } from '@kit.ArkUI';
 import { Files, PickedFile } from '../data/Files';
 import { AttachLogic, ChatPrefs, NotifyLogic, ProfileLogic, Seen } from '../common/Extra';
 import { Notifier } from '../data/Notifier';
@@ -77,6 +82,14 @@ struct Index {
   @StorageLink('openChat') @Watch('onOpenChat') openChatReq: string = '';
   @State prefs: ChatPrefs = new ChatPrefs();
   @State confirmRepair: boolean = false;
+  @State listPrefs: ListPrefs = new ListPrefs();
+  @State viewerUri: string = '';
+  @State viewerName: string = '';
+  @State quote: string = '';
+  @State quoteName: string = '';
+  @State openRuns: number[] = [];
+  @State browse: FolderListing | null = null;
+  @State showAllShapes: boolean = false;
   private seen: Seen | null = null;
   private store: SessionStore | null = null;
   private auth: Auth | null = null;
@@ -97,6 +110,10 @@ struct Index {
   }
 
   onBackPress(): boolean {
+    if (this.viewerUri.length > 0) {
+      this.viewerUri = '';
+      return true;
+    }
     if (this.screen === 'chat') {
       this.closeChat();
       return true;
@@ -125,6 +142,8 @@ struct Index {
     this.auth = new Auth(this.store);
     const s = this.store.current();
     this.prefs = ChatPrefs.decode(this.store.getPref('chat_prefs', ''));
+    this.listPrefs = ListPrefs.decode(this.store.getPref('list_prefs', ''));
+    this.applyTheme(this.listPrefs.theme);
     this.pairAddr = s.baseUrl.replace('/api/mobile-bridge/v1', '');
     const r = LaunchRouter.route(true, s.paired, s.lastChat);
     if (r === StartRoute.Pair) {
@@ -159,6 +178,90 @@ struct Index {
     this.prefs = p;
     if (this.store !== null) {
       await this.store.setPref('chat_prefs', p.encode());
+    }
+  }
+
+  private async saveListPrefs(p: ListPrefs): Promise<void> {
+    this.listPrefs = p;
+    if (this.store !== null) {
+      await this.store.setPref('list_prefs', p.encode());
+    }
+  }
+
+  private applyTheme(t: string): void {
+    const m = t === 'dark' ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK :
+      (t === 'light' ? ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT :
+      ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
+    try {
+      this.ctx().getApplicationContext().setColorMode(m);
+    } catch (e) {
+    }
+  }
+
+  private toast(msg: string): void {
+    try {
+      promptAction.showToast({ message: msg });
+    } catch (e) {
+    }
+  }
+
+  private botLook(id: string): string[] {
+    const b = this.bots.find((x: BotInfo) => x.id === id);
+    if (b === undefined) {
+      return ['', ''];
+    }
+    return [b.shape ?? '', b.color ?? ''];
+  }
+
+  private roomIds(roomId: string): string[] {
+    const r = this.rooms.find((x: RoomInfo) => x.id === roomId);
+    return r === undefined ? [] : r.members.slice(0, 2);
+  }
+
+  private async viewImage(id: string, localUri: string, name: string): Promise<void> {
+    try {
+      this.viewerUri = localUri.length > 0 ? localUri : await this.loadAttachment(id);
+      this.viewerName = name.length > 0 ? name : 'image.jpg';
+    } catch (e) {
+      this.toast('图片打不开');
+    }
+  }
+
+  private async saveImage(): Promise<void> {
+    try {
+      const ok = await Files.saveToGallery(this.ctx(), this.viewerUri, this.viewerName);
+      if (ok) {
+        this.toast('已保存到图库');
+      }
+    } catch (e) {
+      this.toast('没能保存，请稍后再试');
+    }
+  }
+
+  private async fileAction(a: Attachment, save: boolean): Promise<void> {
+    try {
+      const uri = (a.localUri ?? '').length > 0 ? (a.localUri ?? '') : await this.loadAttachment(a.id ?? '');
+      const name = a.name ?? '文件';
+      if (save) {
+        if (await Files.saveAs(this.ctx(), uri, name)) {
+          this.toast('已保存');
+        }
+      } else {
+        await Files.open(this.ctx(), uri, name);
+      }
+    } catch (e) {
+      this.toast(save ? '没能保存，请稍后再试' : '手机上没有能打开它的应用，可以先另存');
+    }
+  }
+
+  private async browseFolder(path: string): Promise<void> {
+    if (this.auth === null) {
+      return;
+    }
+    try {
+      this.browse = await this.auth.with((t: string, api: BridgeApi) => api.listFolder(t, path));
+    } catch (e) {
+      this.formError = friendly(e as Object);
     }
   }
 
@@ -303,7 +406,12 @@ struct Index {
     this.live = [];
     this.pending = [];
     this.notice = '';
+    this.quote = '';
+    this.openRuns = [];
     this.screen = 'chat';
+    if (this.listPrefs.unread.indexOf(kind + ':' + id) >= 0) {
+      this.saveListPrefs(this.listPrefs.opened(kind, id));
+    }
     this.chats = ChatListLogic.clearOpen(this.chats, kind, id);
     Notifier.clear(kind, id);
     if (this.store !== null) {
@@ -393,6 +501,24 @@ struct Index {
     } catch (e) {
       this.nextCursor = cur;
     }
+  }
+
+  private dividerAt(i: number): string {
+    const d = Looks.dividers(this.messages.map((m: ChatItem) => m.time), Date.now());
+    return d.get(i) ?? '';
+  }
+
+  private runAt(i: number): ExRun | null {
+    const r = Exchanges.runs(this.messages).find((x: ExRun) => x.start === i);
+    return r === undefined ? null : r;
+  }
+
+  private foldedAt(i: number): boolean {
+    if (!Exchanges.isExchange(this.messages[i])) {
+      return false;
+    }
+    const r = Exchanges.runs(this.messages).find((x: ExRun) => i >= x.start && i < x.start + x.count);
+    return r !== undefined && this.openRuns.indexOf(r.start) < 0;
   }
 
   private scrollEnd(): void {
@@ -640,7 +766,8 @@ struct Index {
   }
 
   private async send(): Promise<void> {
-    const text = this.input.trim();
+    const body = this.input.trim();
+    const text = this.quote.length > 0 && body.length > 0 ? Looks.quoted(this.quoteName, this.quote, body) : body;
     const ready = this.pending.filter((p: Pending) => p.uploadId.length > 0);
     if ((text.length === 0 && ready.length === 0) || this.auth === null || this.sending) {
       return;
@@ -664,6 +791,7 @@ struct Index {
     this.pending = [];
     this.messages = this.messages.concat([mine]);
     this.input = '';
+    this.quote = '';
     this.sending = true;
     this.wait = WaitMachine.reduce(this.wait, new WaitEvent(WaitKind.Submitted, cid));
     this.scrollEnd();
@@ -1020,19 +1148,32 @@ struct Index {
   @Builder
   ChatRow(c: ChatEntry) {
     Row({ space: 12 }) {
-      Avatar({ name: c.name, color: colorOf(c.color), group: c.kind === 'room' })
+      if (c.kind === 'room') {
+        RoomAvatar({
+          ids: this.roomIds(c.id), shapes: this.roomIds(c.id).map((x: string) => this.botLook(x)[0]),
+          colors: this.roomIds(c.id).map((x: string) => this.botLook(x)[1]), dim: 48
+        })
+      } else {
+        CharAvatar({ botId: c.main ? '' : c.id, shape: c.main ? 'whale' : this.botLook(c.id)[0],
+          color: c.main ? 'deepseek' : (c.color ?? ''), dim: 48 })
+      }
       Column({ space: 4 }) {
         Row() {
           Text(c.name).fontSize(16).fontWeight(FontWeight.Medium).fontColor($r('app.color.text'))
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+          if (this.listPrefs.isPinned(c)) {
+            Text('置顶').fontSize(11).fontColor($r('app.color.sub')).margin({ right: 6 })
+          }
           Text(ChatListLogic.timeLabel(c.lastAt, Date.now())).fontSize(12).fontColor($r('app.color.sub'))
         }
         Row() {
-          Text(c.running ? '正在回复…' : Look.plainPreview(c.preview)).fontSize(14).fontColor($r('app.color.sub'))
+          Text(c.running ? '正在回复…' : Looks.plainPreview(c.preview)).fontSize(14).fontColor($r('app.color.sub'))
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
           if (c.unread > 0) {
             Text(ChatListLogic.badge(c.unread)).fontSize(11).fontColor(Color.White).backgroundColor('#E5484D')
               .borderRadius(9).padding({ left: 6, right: 6 }).height(18)
+          } else if (this.listPrefs.markedUnread(c)) {
+            Circle().width(10).height(10).fill('#E5484D')
           }
         }
       }
@@ -1042,6 +1183,23 @@ struct Index {
     .padding({ left: 16, right: 16, top: 10, bottom: 10 })
     .width('100%')
     .onClick(() => this.openChat(c.kind, c.id, c.name))
+    .bindContextMenu(this.RowMenu(c), ResponseType.LongPress)
+  }
+
+  @Builder
+  RowMenu(c: ChatEntry) {
+    Menu() {
+      MenuItem({ content: this.listPrefs.isPinned(c) ? '取消置顶' : '置顶' })
+        .onClick(() => this.saveListPrefs(this.listPrefs.togglePin(c)))
+      MenuItem({ content: this.listPrefs.markedUnread(c) ? '标为已读' : '标为未读' })
+        .onClick(() => this.saveListPrefs(this.listPrefs.toggleUnread(c)))
+      MenuItem({ content: this.isMuted(c.kind, c.id) ? '取消静音' : '静音' })
+        .onClick(() => this.toggleMute(c.kind, c.id))
+      MenuItem({ content: '从列表隐藏' }).onClick(() => {
+        this.saveListPrefs(this.listPrefs.hide(c, Date.now()));
+        this.toast('有新消息时会重新出现');
+      })
+    }
   }
 
   @Builder
@@ -1078,11 +1236,25 @@ struct Index {
       }
       Refresh({ refreshing: false }) {
         List() {
-          ForEach(this.chats, (c: ChatEntry) => {
+          ForEach(this.listPrefs.apply(this.chats), (c: ChatEntry) => {
             ListItem() {
               this.ChatRow(c)
             }
-          }, (c: ChatEntry) => c.kind + ':' + c.id + ':' + c.unread + ':' + (c.lastAt ?? 0) + ':' + c.running)
+          }, (c: ChatEntry) => c.kind + ':' + c.id + ':' + c.unread + ':' + (c.lastAt ?? 0) + ':' + c.running + ':' +
+            this.listPrefs.isPinned(c) + this.listPrefs.markedUnread(c) + this.isMuted(c.kind, c.id))
+          if (this.listPrefs.hiddenCount(this.chats) > 0) {
+            ListItem() {
+              Text('显示已隐藏的 ' + this.listPrefs.hiddenCount(this.chats) + ' 个会话').fontSize(13)
+                .fontColor($r('app.color.accent')).width('100%').textAlign(TextAlign.Center).padding(14)
+                .onClick(() => this.saveListPrefs(this.listPrefs.unhideAll()))
+            }
+          }
+          if (this.chats.length === 0) {
+            ListItem() {
+              Text('还没有会话，点右上角＋新建一个助手').fontSize(14).fontColor($r('app.color.sub'))
+                .width('100%').textAlign(TextAlign.Center).padding({ top: 80 })
+            }
+          }
         }
         .divider({ strokeWidth: 0.5, color: $r('app.color.line'), startMargin: 72 })
         .width('100%')
@@ -1103,6 +1275,7 @@ struct Index {
           if (a.type === 'image') {
             AttImage({ attId: a.id ?? '', localUri: a.localUri ?? '', loader: (id: string) => this.loadAttachment(id) })
               .margin(2)
+              .onClick(() => this.viewImage(a.id ?? '', a.localUri ?? '', a.name ?? ''))
           } else {
             Row({ space: 8 }) {
               Text(AttachLogic.ext(a.name)).fontSize(11).fontColor(Color.White).backgroundColor('#5B6B8C')
@@ -1116,10 +1289,41 @@ struct Index {
               .layoutWeight(1)
             }
             .padding(8).borderRadius(10).backgroundColor('#0F000000').width(220).margin(2)
+            .onClick(() => this.fileAction(a, false))
+            .bindContextMenu(this.FileMenu(a), ResponseType.LongPress)
           }
         }, (a: Attachment, i: number) => (a.id ?? a.localUri ?? '') + i)
       }
     }
+  }
+
+  @Builder
+  FileMenu(a: Attachment) {
+    Menu() {
+      MenuItem({ content: '打开' }).onClick(() => this.fileAction(a, false))
+      MenuItem({ content: '另存到手机' }).onClick(() => this.fileAction(a, true))
+    }
+  }
+
+  @Builder
+  MsgMenu(m: ChatItem) {
+    Menu() {
+      MenuItem({ content: '复制' }).onClick(() => {
+        const pb = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, Looks.splitQuote(m.text ?? '')[1]);
+        pasteboard.getSystemPasteboard().setData(pb).then(() => this.toast('已复制')).catch(() => {
+        });
+      })
+      MenuItem({ content: '引用回复' }).onClick(() => {
+        this.quote = Looks.snippet(Looks.splitQuote(m.text ?? '')[1]);
+        this.quoteName = m.kind === 'user' ? '我' : (m.name ?? this.openName);
+      })
+    }
+  }
+
+  @Builder
+  QuoteLine(q: string) {
+    Text(q).fontSize(12).fontColor($r('app.color.sub')).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+      .padding({ left: 8 }).border({ width: { left: 2 }, color: $r('app.color.line') })
   }
 
   @Builder
@@ -1166,8 +1370,11 @@ struct Index {
         Blank()
         Column({ space: 6 }) {
           this.Atts(m.attachments)
-          if ((m.text ?? '').length > 0) {
-            Text(m.text ?? '').fontSize(15).fontColor($r('app.color.text')).copyOption(CopyOptions.LocalDevice)
+          if (Looks.splitQuote(m.text ?? '')[0].length > 0) {
+            this.QuoteLine(Looks.splitQuote(m.text ?? '')[0])
+          }
+          if (Looks.splitQuote(m.text ?? '')[1].length > 0) {
+            Text(Looks.splitQuote(m.text ?? '')[1]).fontSize(15).fontColor($r('app.color.text'))
           }
         }
         .alignItems(HorizontalAlign.End)
@@ -1176,12 +1383,17 @@ struct Index {
         .backgroundColor($r('app.color.mine'))
         .constraintSize({ maxWidth: '82%' })
         .opacity(m.local ? 0.7 : 1)
+        .bindContextMenu(this.MsgMenu(m), ResponseType.LongPress)
       }
       .width('100%')
     } else if (m.kind === 'bot' || m.kind === 'member') {
       Column({ space: 4 }) {
         if (m.kind === 'member' && m.name !== null) {
-          Text(m.name).fontSize(12).fontColor($r('app.color.sub'))
+          Row({ space: 6 }) {
+            CharAvatar({ botId: m.botId ?? '', shape: this.botLook(m.botId ?? '')[0],
+              color: this.botLook(m.botId ?? '')[1], dim: 20 })
+            Text(m.name).fontSize(12).fontColor($r('app.color.sub'))
+          }
         }
         Column({ space: 6 }) {
           this.Atts(m.attachments)
@@ -1189,6 +1401,7 @@ struct Index {
             MdText({ text: m.text ?? '' })
           }
         }
+        .bindContextMenu(this.MsgMenu(m), ResponseType.LongPress)
         .alignItems(HorizontalAlign.Start)
         .padding(10)
         .borderRadius(14)
@@ -1233,11 +1446,34 @@ struct Index {
               .textAlign(TextAlign.Center).onClick(() => this.loadOlder())
           }
         }
+        if (this.openKind === 'room' && this.messages.length >= 40) {
+          ListItem() {
+            Text('群聊在手机上只显示最近的消息，更早的请在电脑上查看').fontSize(12).fontColor($r('app.color.sub'))
+              .width('100%').textAlign(TextAlign.Center)
+          }
+        }
         ForEach(this.messages, (m: ChatItem, i: number) => {
           ListItem() {
-            this.Bubble(m)
+            Column({ space: 8 }) {
+              if (this.dividerAt(i).length > 0) {
+                Text(this.dividerAt(i)).fontSize(12).fontColor($r('app.color.sub')).width('100%')
+                  .textAlign(TextAlign.Center)
+              }
+              if (this.runAt(i) !== null) {
+                Text((this.openRuns.indexOf(i) >= 0 ? '收起 · ' : '') + Exchanges.words(this.runAt(i) as ExRun))
+                  .fontSize(12).fontColor($r('app.color.accent')).width('100%').textAlign(TextAlign.Center)
+                  .onClick(() => {
+                    this.openRuns = this.openRuns.indexOf(i) >= 0 ? this.openRuns.filter((x: number) => x !== i) :
+                    this.openRuns.concat([i]);
+                  })
+              }
+              if (!this.foldedAt(i)) {
+                this.Bubble(m)
+              }
+            }
           }
-        }, (m: ChatItem, i: number) => (m.seq ?? -1) + ':' + (m.clientMessageId ?? '') + ':' + i + ':' + m.local)
+        }, (m: ChatItem, i: number) => (m.seq ?? -1) + ':' + (m.clientMessageId ?? '') + ':' + i + ':' + m.local + ':' +
+          this.messages.length + ':' + this.openRuns.join(','))
         ForEach(this.live.filter((x: LiveReply) => RoomStreams.shown(x) !== null), (x: LiveReply) => {
           ListItem() {
             Column({ space: 4 }) {
@@ -1307,7 +1543,12 @@ struct Index {
           ForEach(this.mentionRows(), (r: MentionRow) => {
             ListItem() {
               Row({ space: 10 }) {
-                Avatar({ name: r.name, dim: 28, group: r.everyone })
+                if (r.everyone) {
+                  RoomAvatar({ ids: this.roomIds(this.openId), shapes: this.roomIds(this.openId).map((x: string) =>
+                  this.botLook(x)[0]), colors: this.roomIds(this.openId).map((x: string) => this.botLook(x)[1]), dim: 28 })
+                } else {
+                  CharAvatar({ botId: r.id, shape: this.botLook(r.id)[0], color: this.botLook(r.id)[1], dim: 28 })
+                }
                 Text(r.name).fontSize(15).fontColor($r('app.color.text'))
               }
               .padding({ left: 14, right: 14, top: 8, bottom: 8 })
@@ -1324,11 +1565,23 @@ struct Index {
       if (this.openKind === 'room' && this.answerHint().length > 0) {
         Text(this.answerHint()).fontSize(12).fontColor($r('app.color.sub')).padding({ left: 16 }).width('100%')
       }
+      if (this.quote.length > 0) {
+        Row({ space: 8 }) {
+          this.QuoteLine(this.quoteName + '：' + this.quote)
+          Blank()
+          Text('✕').fontSize(14).fontColor($r('app.color.sub')).padding(6).onClick(() => {
+            this.quote = '';
+          })
+        }
+        .padding({ left: 14, right: 10 })
+        .width('100%')
+      }
       Row({ space: 8 }) {
         Text('＋').fontSize(26).fontColor($r('app.color.text')).padding({ left: 4, right: 4 })
           .bindMenu(this.attachOpen, this.AttachMenu, { onDisappear: () => this.attachOpen = false })
           .onClick(() => this.attachOpen = true)
-        TextArea({ placeholder: this.openKind === 'room' ? '发消息，输入 @ 可以指定谁回复' : '发消息', text: this.input })
+        TextArea({ placeholder: this.openKind === 'room' ? Looks.inputHint('', true) + '，输入 @ 可以指定谁回复' :
+          Looks.inputHint(this.openName, false), text: this.input })
           .onChange((v: string) => this.input = v)
           .constraintSize({ minHeight: 42, maxHeight: 140 })
           .layoutWeight(1)
@@ -1360,7 +1613,8 @@ struct Index {
   @Builder
   PickRow(b: BotInfo, label: string, on: boolean, tap: () => void) {
     Row({ space: 12 }) {
-      Avatar({ name: b.name, color: colorOf(b.color), dim: 36 })
+      CharAvatar({ botId: b.main ? '' : b.id, shape: b.main ? 'whale' : (b.shape ?? ''),
+        color: b.main ? 'deepseek' : (b.color ?? ''), dim: 36 })
       Column() {
         Text(b.name).fontSize(16).fontColor($r('app.color.text'))
         if ((b.role ?? '').length > 0) {
@@ -1493,7 +1747,9 @@ struct Index {
         Scroll() {
           Column({ space: 8 }) {
             Row({ space: 12 }) {
-              Avatar({ name: this.profile.name, color: colorOf(this.profile.color), dim: 56 })
+              CharAvatar({ botId: this.profile.main ? '' : this.profile.id,
+                shape: this.profile.main ? 'whale' : (this.profile.shape ?? ''),
+                color: this.profile.main ? 'deepseek' : (this.profile.color ?? ''), dim: 56 })
               Column() {
                 Text(this.profile.name).fontSize(20).fontWeight(FontWeight.Bold).fontColor($r('app.color.text'))
                 Text(this.profile.role).fontSize(14).fontColor($r('app.color.sub'))
@@ -1501,6 +1757,21 @@ struct Index {
               .alignItems(HorizontalAlign.Start)
             }
             .width('100%')
+            if (!this.profile.main) {
+              this.Field('外观')
+              this.LookPicker(this.profile.shape ?? Looks.defaultShape(this.profile.id),
+                this.profile.color ?? Looks.defaultColor(this.profile.id), (sh: string, co: string) => {
+                  const b: JObj = {};
+                  b['id'] = this.profile?.id ?? '';
+                  if (sh.length > 0) {
+                    b['shape'] = sh;
+                  }
+                  if (co.length > 0) {
+                    b['color'] = co;
+                  }
+                  this.saveProfile(b);
+                })
+            }
             this.Field('使用的模型：' + this.modelName(this.profile.model))
             if (this.options !== null) {
               ForEach(this.options.models, (m: ModelOption) => {
@@ -1569,6 +1840,66 @@ struct Index {
   }
 
   @Builder
+  LookPicker(shape: string, color: string, pick: (shape: string, color: string) => void) {
+    Column({ space: 6 }) {
+      Flex({ wrap: FlexWrap.Wrap }) {
+        ForEach(this.shapeIds().slice(0, this.showAllShapes ? 100 : 12), (id: string) => {
+          Column() {
+            CharAvatar({ botId: '', shape: id, color: color, dim: 36 })
+          }
+          .padding(4).margin(2).borderRadius(10)
+          .border({ width: id === shape ? 2 : 0, color: '#000A25' })
+          .onClick(() => pick(id, ''))
+          .accessibilityText(SHAPE_LABELS[id] ?? id)
+        }, (id: string) => id + color + (id === shape))
+        if (!this.showAllShapes && this.shapeIds().length > 12) {
+          Text('更多').fontSize(13).fontColor($r('app.color.accent')).padding(12).onClick(() => {
+            this.showAllShapes = true;
+          })
+        }
+      }
+      Flex({ wrap: FlexWrap.Wrap }) {
+        ForEach(this.colorIds(), (id: string) => {
+          Stack() {
+            if (id === 'aurora') {
+              Circle().width(26).height(26).fill('#00F0E4')
+            } else {
+              Circle().width(26).height(26).fill(Looks.ink(id, false))
+            }
+          }
+          .padding(3).margin(3).borderRadius(18)
+          .border({ width: id === color ? 2 : 0, color: '#000A25' })
+          .onClick(() => pick('', id))
+          .accessibilityText(COLOR_LABELS[id] ?? id)
+        }, (id: string) => id + (id === color))
+      }
+    }
+    .width('100%')
+  }
+
+  private shapeIds(): string[] {
+    const o = this.options;
+    const ids = o !== null && o.shapes.length > 0 ? o.shapes.map((x: NamedOption) => x.id) :
+      Object.keys(SHAPE_LABELS);
+    return ids.filter((x: string) => x !== 'whale' && Looks.shapeOf(x) !== null);
+  }
+
+  private colorIds(): string[] {
+    const o = this.options;
+    return o !== null && o.colors.length > 0 ? o.colors.map((x) => x.id).filter((x: string) => Looks.isColor(x)) :
+      PICKER_COLORS;
+  }
+
+  @Builder
+  Chip(label: string, on: boolean, tap: () => void) {
+    Text(label).fontSize(14).padding({ left: 12, right: 12, top: 6, bottom: 6 }).margin(4)
+      .borderRadius(14)
+      .backgroundColor(on ? '#000A25' : $r('app.color.card'))
+      .fontColor(on ? Color.White : $r('app.color.text'))
+      .onClick(tap)
+  }
+
+  @Builder
   NewBotView() {
     Column() {
       this.TopBar('新建助手', () => {
@@ -1580,6 +1911,17 @@ struct Index {
           TextInput({ text: this.botDraft.name }).maxLength(this.options?.nameMax ?? 40).onChange((v: string) => {
             const n = this.copyDraft();
             n.name = v;
+            this.botDraft = n;
+          })
+          this.Field('外观')
+          this.LookPicker(this.botDraft.shape, this.botDraft.color, (sh: string, co: string) => {
+            const n = this.copyDraft();
+            if (sh.length > 0) {
+              n.shape = sh;
+            }
+            if (co.length > 0) {
+              n.color = co;
+            }
             this.botDraft = n;
           })
           this.Field('职责（可不填）')
@@ -1627,6 +1969,71 @@ struct Index {
                     this.botDraft = n;
                   })
               }, (e: EffortOption) => e.id)
+            }
+          }
+          if (this.options !== null) {
+            this.Field('工作目录')
+            Flex({ wrap: FlexWrap.Wrap }) {
+              this.Chip('默认', this.botDraft.workDir.length === 0 || this.botDraft.workDir === this.options.teamFolder, () => {
+                const n = this.copyDraft();
+                n.workDir = '';
+                this.botDraft = n;
+              })
+              ForEach(this.options.folders, (f: FolderOption) => {
+                this.Chip(f.title, this.botDraft.workDir === f.path, () => {
+                  const n = this.copyDraft();
+                  n.workDir = f.path;
+                  this.botDraft = n;
+                })
+              }, (f: FolderOption) => f.path)
+              if (this.options.canBrowse) {
+                this.Chip('浏览…', false, () => {
+                  this.browseFolder(this.botDraft.workDir.length > 0 ? this.botDraft.workDir : (this.options?.teamFolder ?? ''));
+                })
+              }
+            }
+            TextInput({ text: this.botDraft.workDir, placeholder: '或填写文件夹的完整路径' }).onChange((v: string) => {
+              const n = this.copyDraft();
+              n.workDir = v;
+              this.botDraft = n;
+            })
+            if (this.browse !== null) {
+              Column({ space: 2 }) {
+                Text(this.browse.path).fontSize(12).fontColor($r('app.color.sub')).width('100%')
+                ForEach(this.browse.entries, (f: FolderOption) => {
+                  Text('📁 ' + f.title).fontSize(15).fontColor($r('app.color.text')).width('100%').padding(8)
+                    .onClick(() => this.browseFolder(f.path))
+                }, (f: FolderOption) => f.path)
+                Row({ space: 10 }) {
+                  Button('取消').layoutWeight(1).backgroundColor('#8A8F99').onClick(() => {
+                    this.browse = null;
+                  })
+                  Button('使用这个文件夹').layoutWeight(1).backgroundColor('#000A25').onClick(() => {
+                    const n = this.copyDraft();
+                    n.workDir = this.browse?.path ?? '';
+                    this.botDraft = n;
+                    this.browse = null;
+                  })
+                }
+              }
+              .padding(10).borderRadius(12).backgroundColor($r('app.color.card'))
+            }
+            if (this.options.agentPresets !== null && this.options.agentPresets.length > 0) {
+              this.Field('工作方式')
+              Flex({ wrap: FlexWrap.Wrap }) {
+                this.Chip('默认', this.botDraft.agentPreset.length === 0, () => {
+                  const n = this.copyDraft();
+                  n.agentPreset = '';
+                  this.botDraft = n;
+                })
+                ForEach(this.options.agentPresets, (pr: NamedOption) => {
+                  this.Chip(pr.label, this.botDraft.agentPreset === pr.id, () => {
+                    const n = this.copyDraft();
+                    n.agentPreset = pr.id;
+                    this.botDraft = n;
+                  })
+                }, (pr: NamedOption) => pr.id)
+              }
             }
           }
           this.Field('工作说明（可不填）')
@@ -1726,6 +2133,22 @@ struct Index {
               .padding(12).borderRadius(12).backgroundColor($r('app.color.card')).width('100%')
             }, (k: string) => k)
           }
+          Row() {
+            Text('外观').fontSize(15).fontColor($r('app.color.text')).layoutWeight(1)
+            this.Chip('跟随系统', this.listPrefs.theme === 'system', () => this.setTheme('system'))
+            this.Chip('浅色', this.listPrefs.theme === 'light', () => this.setTheme('light'))
+            this.Chip('深色', this.listPrefs.theme === 'dark', () => this.setTheme('dark'))
+          }
+          .padding(12).borderRadius(12).backgroundColor($r('app.color.card')).width('100%')
+          if (this.listPrefs.hiddenCount(this.chats) > 0) {
+            Row() {
+              Text('已隐藏 ' + this.listPrefs.hiddenCount(this.chats) + ' 个会话').fontSize(15)
+                .fontColor($r('app.color.text')).layoutWeight(1)
+              Text('全部显示').fontSize(13).fontColor($r('app.color.accent'))
+                .onClick(() => this.saveListPrefs(this.listPrefs.unhideAll()))
+            }
+            .padding(12).borderRadius(12).backgroundColor($r('app.color.card')).width('100%')
+          }
           Button('重新配对').width('100%').height(44).backgroundColor('#E5484D').margin({ top: 20 })
             .onClick(() => {
               this.confirmRepair = true;
@@ -1742,7 +2165,7 @@ struct Index {
               })
             }
           }
-          Text('版本 0.1.0').fontSize(12).fontColor($r('app.color.sub')).margin({ top: 20 })
+          Text('版本 0.2.0').fontSize(12).fontColor($r('app.color.sub')).margin({ top: 20 })
         }
         .padding(16)
       }
@@ -1752,7 +2175,13 @@ struct Index {
     .height('100%')
   }
 
+  private setTheme(t: string): void {
+    this.saveListPrefs(this.listPrefs.withTheme(t));
+    this.applyTheme(t);
+  }
+
   build() {
+    Stack() {
     Column() {
       if (this.screen === 'loading') {
         LoadingProgress().width(40).height(40).margin({ top: 200 })
@@ -1779,5 +2208,17 @@ struct Index {
     .width('100%')
     .height('100%')
     .backgroundColor($r('app.color.bg'))
+      if (this.viewerUri.length > 0) {
+        ImageViewer({
+          uri: this.viewerUri, onClose: () => {
+            this.viewerUri = '';
+          }, onSave: () => {
+            this.saveImage();
+          }
+        })
+      }
+    }
+    .width('100%')
+    .height('100%')
   }
 }

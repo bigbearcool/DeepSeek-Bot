@@ -25,6 +25,7 @@ English | [中文](README.zh.md)
 
 | 日期 | 合并提交 | 上游 PR |
 |---|---|---|
+| 2026-10-20 | `4b722f6` | #365 macOS 应用改为 zip 打包发布（不再使用 dmg） |
 | 2026-10-20 | `f7b8fb5` | #363 Windows 桌面无边框窗口，Win11 启用 Mica；stylesheet 加载后重测 caption 颜色；右侧栏避开 caption 带 |
 | 2026-10-20 | `d02f761` | #354 macOS 通用包单独报错（Stop a universal macOS build with its own message）<br>#355 macOS 加 File 菜单，Cmd+W 关窗<br>#358 发布演练把安装包保留为 workflow 产物<br>#359 发布演练打包不再访问 registry<br>#360 首次运行中途退出时什么都不写入<br>#361 会话要等 DSH 列表里有了才打开 |
 | 2026-10-19 | `1e7853b` | #345 Bot 的 working_directory 改到自身文件夹之外时，作为新的工作目录<br>#348 架构与当前 Node 不一致时停止桌面包构建 |

@@ -18,6 +18,7 @@ English | [中文](README.zh.md)
 - **`ds-bot/`**（当前 0.2.0）：DS Bot 插件本体。在 DSH 里创建 Bot、和 Bot 单聊、拉 Bot 进群聊。本 fork 在上游基础上加了「每个 Bot 单独指定 Agent 预设」等改动。
 - **`dsh-mobile-bridge/`**（当前 0.0.19）：DSH 插件，给手机开一个专用接口，负责配对和收发消息。
 - **`dsh-mobile-android/`**（当前 0.2.4）：Android 手机 App。
+- **`dsh-mobile-harmony/`**：纯血鸿蒙（HarmonyOS NEXT）原生 App，功能和 Android 版对齐。
 - **`app/`、`docker/`**：上游自带的桌面应用和 Docker 镜像，用法见下面的英文原文。
 
 ## 怎么装
@@ -50,6 +51,8 @@ cd dsh-mobile-android
 
 装包在 `app/build/outputs/apk/debug/app-debug.apk`，传到 Android 手机上装好。
 
+鸿蒙手机：用 DevEco Studio 打开 `dsh-mobile-harmony/`，登录你自己的华为开发者账号开自动签名，编出签名的 HAP 后用 `hdc install -r <hap 路径>` 装到手机（详见下方「手机 App」）。
+
 **4. 配对**：在 DSH 网页左侧栏底部点「**手机配对**」，会弹出一个 6 位配对码（约 5 分钟有效）和二维码。打开手机 App，扫码或输入配对码就连上了。要在外网用，在同一个「手机配对」弹窗下方填写并保存「公网访问地址」（例如 `https://example.com:8443`，只有登录了 DSH 的网页端能改），之后二维码里就会带上这个地址；不填就用自动找到的局域网地址。
 
 ## 装好后能做什么
@@ -75,6 +78,7 @@ cd dsh-mobile-android
 - **ds-bot 0.1.9：去掉「连接插件」的红色叹号角标**（`c2d8378`，`ds-bot/client.js`、`src/client/sidebar.js`、`src/client/styles.js`）。
 - **移除预设里的 `{{cwd}}` 提示词变量**：避免群聊轮次报 `unknown prompt variable`。
 - **新增手机端**：`dsh-mobile-bridge/`（DSH 插件）和 `dsh-mobile-android/`（Android App），见下方「手机 App」。
+- **新增鸿蒙原生 App**：`dsh-mobile-harmony/`（ArkTS + ArkUI），协议沿用 dsh-mobile-bridge，见下方「手机 App」。
 
 ## 已合入的上游功能
 
@@ -92,6 +96,7 @@ cd dsh-mobile-android
 
 - **dsh-mobile-bridge**（DSH 插件，当前 0.0.19）：给手机提供接口，新建 Bot、建群、切换模型等直接调用 ds-bot 现有接口，校验和桌面一致。
 - **dsh-mobile-android**（Android App，当前 0.2.4，Kotlin + Compose）。
+- **dsh-mobile-harmony**（鸿蒙原生 App，ArkTS + ArkUI，包名 `com.deepseek.dshmobile.harmony`）。
 
 **功能**：Bot 单聊和群聊；历史、发消息、流式回复、停止生成；Markdown；浅色 / 深色主题；断线重连并补回消息；未读数、置顶、隐藏；在手机上审批；附件和图片，保存到手机；系统通知（总开关和按会话开关）；新建 Bot、发起群聊；给 Bot 切换模型，立即生效。群聊输入 `@` 弹出本群 Bot 选择器：不 @ 时全员回复，@ 了谁就只有谁回复，和电脑端规则一致。新启动图标。
 
@@ -114,6 +119,25 @@ cd dsh-mobile-android
 - 置顶、隐藏、未读标记只存在手机上。
 - 早先建的「只管理员回复」旧群，不 @ 时仍只管理员回，可在群资料里改成所有成员。
 - 资料页没有文档 / 链接 / 媒体标签页，也没有定时任务和用量页；头像不能用照片。
+
+### 鸿蒙版
+
+**功能**：和 Android 0.2.4 对齐。配对（扫码或手填）、会话列表（未读、正在回复）、单聊（历史、流式回复、停止、Markdown）、群聊（@ 选择器、全角 ＠、谁会回复提示）、建群和群设置、图片和文件收发、审批、助手资料和切模型、新建助手、看大图并存到图库、长按复制或引用回复、置顶 / 标为未读 / 隐藏 / 静音、浅色深色、搜索、本地通知。
+
+**怎么编译**：装好 DevEco Studio，用它自带的 JDK、node、ohpm、hvigor，在 `dsh-mobile-harmony/` 下：
+
+```sh
+ohpm install
+hvigorw assembleHap -p buildMode=debug --no-daemon   # 编出未签名 HAP
+hvigorw test -p module=entry@default --no-daemon     # 跑单测
+```
+
+**签名**：仓库里不带任何签名文件。装到真机前，要在 DevEco Studio 里登录你自己的华为开发者账号，用「自动签名」。它会把签名配置写进 `build-profile.json5`，这部分只留在你本机，不要提交。之后用 `hdc install -r entry/build/default/outputs/default/entry-default-signed.hap` 安装。
+
+**已知限制**：
+
+- 没有接 Push Kit：通知只在 App 运行时（前台或刚切到后台）能发出。
+- 群聊只能看到电脑端保留的最近消息（最近 60 行），不能继续往前翻；单聊可以往前翻。
 
 ---
 

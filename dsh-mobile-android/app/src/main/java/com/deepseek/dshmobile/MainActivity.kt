@@ -294,6 +294,7 @@ class MainActivity : ComponentActivity() {
                             onMute = { state.selectedRoom?.let { vm.toggleMute("room", it.id) } },
                             onRemove = vm::removeMember,
                             onRename = vm::renameRoom,
+                            onMode = vm::setRoomMode,
                         )
                     }
                     Screen.AddMember -> {

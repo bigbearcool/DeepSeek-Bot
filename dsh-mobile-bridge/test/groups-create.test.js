@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import { apply } from '../index.js'
 import { roomItem, roomItems } from '../src/chat-format.js'
 import { createDsBotApi, DSBOT_ROUTE } from '../src/dsbot-api.js'
-import { createBotPayload, createRoomPayload, updateBotPayload } from '../src/routes.js'
+import { createBotPayload, createRoomPayload, updateBotPayload, updateRoomPayload } from '../src/routes.js'
 import { dispatch, fakeContext } from './fake-ctx.js'
 
 const P = '/api/mobile-bridge/v1'
@@ -62,7 +62,19 @@ function fakeDsBot() {
           return reply({ id: 'new-1', name: payload.name, role: payload.role ?? '', model: payload.model, avatar: payload.avatar, instructions: 'secret-ish' })
         case 'create-room':
           if ((payload.members ?? []).length < 2) return fail('A group chat needs at least two Bots', 'bot/refused')
+          // Match real channel.js: create-room ignores payload.mode and defaults to admin.
           return reply({ id: 'room-new', name: payload.name ?? 'Chief、Writer', members: payload.members, admin: payload.admin, mode: 'admin' })
+        case 'update-room': {
+          const room = STATE.rooms[payload.id] ?? { id: payload.id, name: '周报', members: payload.members ?? ['chief', 'writer'], admin: 'chief', mode: 'admin' }
+          if (payload.mode) room.mode = payload.mode
+          if (payload.name !== undefined) room.name = payload.name
+          if (payload.id === 'room-new' || !STATE.rooms[payload.id]) {
+            // Fresh room from create: invent a view shaped like channel's update-room reply.
+            return reply({ room: { id: 'room-new', name: room.name ?? '周报', members: room.members ?? ['chief', 'writer'], admin: room.admin ?? 'chief', mode: room.mode }, changes: ['every member now replies in turn'] })
+          }
+          STATE.rooms[payload.id] = room
+          return reply({ room: { id: room.id, name: room.name, members: room.members, admin: room.admin, mode: room.mode }, changes: [] })
+        }
         case 'send': return reply(true)
         case 'update-bot': {
           const bot = STATE.bots[payload.id]
@@ -181,16 +193,33 @@ test('rooms/create sends admin first with greet, like the desktop form', async (
   assert.equal(ok.status, 200)
   assert.equal(ok.body.room.id, 'room-new')
   assert.deepEqual(h.ds.calls.find(c => c.endpoint === 'create-room').payload, { members: ['chief', 'writer'], admin: 'chief', greet: true, mode: 'everyone', name: '周报' })
+  // channel create-room drops mode (stays admin); bridge follows up with update-room.
+  assert.deepEqual(h.ds.calls.find(c => c.endpoint === 'update-room')?.payload, { id: 'room-new', mode: 'everyone' })
+  assert.equal(ok.body.room.mode, 'everyone')
   const few = await h.json('POST', '/rooms/create', { headers, body: { admin: 'chief', members: [] } })
   assert.equal(few.status, 400)
   assert.match(few.body.error.message, /at least two/)
   assert.equal(few.body.error.zh, '群聊至少要两个助手')
 })
 
+test('rooms/update can set reply mode (everyone / admin)', async (t) => {
+  const h = start(); t.after(h.stop)
+  const headers = await authed(h)
+  const ok = await h.json('POST', '/rooms/update', { headers, body: { id: 'room-1', mode: 'everyone' } })
+  assert.equal(ok.status, 200)
+  assert.equal(ok.body.room.mode, 'everyone')
+  assert.deepEqual(h.ds.calls.at(-1), { endpoint: 'update-room', payload: { id: 'room-1', mode: 'everyone' } })
+  const bad = await h.json('POST', '/rooms/update', { headers, body: { id: 'room-1', mode: 'weird' } })
+  assert.equal(bad.status, 200) // mode ignored when not admin|everyone
+  assert.deepEqual(h.ds.calls.at(-1).payload, { id: 'room-1' })
+})
+
 test('payload helpers drop non-string values', () => {
   assert.deepEqual(createBotPayload({ name: 5, role: 'r', avatar: { shape: 3 } }), { role: 'r' })
   assert.deepEqual(createRoomPayload({ members: ['a', 1, 'b'] }), { members: ['a', 'b'], greet: true, mode: 'everyone' })
   assert.deepEqual(createRoomPayload({ members: ['a'], admin: 'a', mode: 'admin' }), { members: ['a'], admin: 'a', greet: true, mode: 'admin' })
+  assert.deepEqual(updateRoomPayload({ id: 'r', mode: 'everyone', name: 'n' }), { id: 'r', mode: 'everyone', name: 'n' })
+  assert.deepEqual(updateRoomPayload({ id: 'r', mode: 'nope' }), { id: 'r' })
 })
 
 test('bots/options picks models, presets, colors from ds-bot state without leaking the rest', async (t) => {

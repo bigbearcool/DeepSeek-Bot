@@ -67,4 +67,11 @@ class MentionsTest {
         assertFalse(Mentions.calledIds(twice, members).all)
         assertEquals(listOf("c", "k"), Mentions.calledIds(twice, members).ids)
     }
+
+    @Test fun fullwidthAtOpensPickerAndCalls() {
+        val a = Mentions.activeAt("请 ＠Chi")!!
+        assertEquals("Chi", a.query)
+        assertEquals("请 @Chief ", Mentions.apply("请 ＠Chi", a, "@Chief "))
+        assertEquals(listOf("c"), Mentions.calledIds("请＠Chief 看", members).ids)
+    }
 }

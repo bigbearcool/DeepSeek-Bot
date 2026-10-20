@@ -21,7 +21,8 @@ object Mentions {
      * Skips addresses like "a@b" the same way ds-bot does.
      */
     fun activeAt(text: String): Active? {
-        val at = text.lastIndexOf('@')
+        // Chinese keyboards often insert fullwidth ＠; treat it like ASCII @ for the picker.
+        val at = maxOf(text.lastIndexOf('@'), text.lastIndexOf('＠'))
         if (at < 0) return null
         if (at > 0 && isAddressBefore(text[at - 1])) return null
         val query = text.substring(at + 1)
@@ -55,7 +56,8 @@ object Mentions {
 
     /** Bot ids this text calls, by the same longest-name rule ds-bot uses (no references). */
     fun calledIds(text: String, members: List<BotInfo>): Called {
-        val value = text
+        // ds-bot only reads ASCII @; normalize fullwidth so a phone-typed ＠ still calls.
+        val value = text.replace('＠', '@')
         val byLength = members.filter { it.name.isNotBlank() }.sortedByDescending { it.name.length }
         val found = linkedSetOf<String>()
         var all = false

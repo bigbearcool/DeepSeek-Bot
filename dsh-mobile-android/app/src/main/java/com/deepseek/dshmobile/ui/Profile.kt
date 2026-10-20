@@ -267,7 +267,7 @@ private fun InstructionsEditor(name: String, value: String, saving: Boolean, onC
 @Composable
 fun GroupInfoScreen(
     state: UiState, onBack: () -> Unit, onMember: (String) -> Unit, onAdd: () -> Unit, onMute: () -> Unit,
-    onRemove: (String) -> Unit = {}, onRename: (String) -> Unit = {},
+    onRemove: (String) -> Unit = {}, onRename: (String) -> Unit = {}, onMode: (String) -> Unit = {},
 ) {
     val c = LocalDs.current
     val room = state.selectedRoom ?: return
@@ -313,6 +313,23 @@ fun GroupInfoScreen(
                 SheetRow(null, "通知", trailing = {
                     Switch(!muted, { onMute() }, colors = SwitchDefaults.colors(checkedThumbColor = c.bg, checkedTrackColor = c.ink, uncheckedThumbColor = c.ink3, uncheckedTrackColor = c.group, uncheckedBorderColor = c.line))
                 }, onClick = onMute)
+            }
+            // Same modes as the computer group settings: everyone vs admin.
+            val everyone = room.mode != "admin"
+            Spacer(Modifier.height(12.dp))
+            GroupLabel("谁来回复")
+            SheetCard {
+                SheetRow(null, "所有成员", trailing = {
+                    if (everyone) Text("当前", color = c.ink3, fontSize = 13.sp)
+                }, onClick = { if (!everyone) onMode("everyone") })
+                Box(Modifier.fillMaxWidth().padding(start = 16.dp).height(1.dp).background(c.line))
+                SheetRow(null, "先由管理员", trailing = {
+                    if (!everyone) Text("当前", color = c.ink3, fontSize = 13.sp)
+                }, onClick = { if (everyone) onMode("admin") })
+            }
+            if (!everyone) {
+                Text("不 @ 时只有管理员会回；用 @名字 或选「所有成员」让大家一起回。",
+                    color = c.ink3, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp))
             }
             Spacer(Modifier.height(32.dp))
         }

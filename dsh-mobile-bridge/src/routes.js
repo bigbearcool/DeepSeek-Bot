@@ -66,6 +66,8 @@ export function updateRoomPayload(body = {}) {
   const ids = v => (Array.isArray(v) ? v.filter(id => typeof id === 'string' && id) : undefined)
   const out = { id: str(body.id) ?? '' }
   if (str(body.name) !== undefined) out.name = body.name
+  // ds-bot channel create-room drops mode; phones set everyone via update-room after create.
+  if (body.mode === 'admin' || body.mode === 'everyone') out.mode = body.mode
   const add = ids(body.add); if (add?.length) out.add = add
   const remove = ids(body.remove); if (remove?.length) out.remove = remove
   return out
@@ -521,7 +523,7 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
         if (!payload.id) throw Object.assign(new Error('id required'), { status: 400 })
         const value = await dsbot.call('update-room', payload)
         const room = value?.room ?? {}
-        return { ok: true, room: { id: room.id ?? payload.id, name: room.name ?? '', members: room.members ?? [] }, changes: value?.changes ?? null }
+        return { ok: true, room: { id: room.id ?? payload.id, name: room.name ?? '', members: room.members ?? [], admin: room.admin ?? null, mode: room.mode ?? payload.mode ?? null }, changes: value?.changes ?? null }
       }))
     }
 
@@ -592,8 +594,21 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
     if (method === 'POST' && sub === '/rooms/create') {
       return withAuth(request, async () => dsCall(async () => {
         const body = await readJson(request)
-        const room = await dsbot.call('create-room', createRoomPayload(body))
-        return { ok: true, room: { id: room.id, name: room.name, members: room.members ?? [], admin: room.admin ?? null, mode: room.mode ?? null } }
+        const payload = createRoomPayload(body)
+        // ds-bot's HTTP create-room (channel.js) ignores body.mode and defaults to admin.
+        // Phone groups want everyone so a plain message reaches every member; set mode
+        // via update-room (which does pass mode) right after create.
+        let room = await dsbot.call('create-room', payload)
+        if (payload.mode && room?.mode !== payload.mode) {
+          try {
+            const updated = await dsbot.call('update-room', { id: room.id, mode: payload.mode })
+            room = updated?.room ?? { ...room, mode: payload.mode }
+          } catch (err) {
+            // Keep the room; mode stays whatever create wrote. Surface in diagnostics.
+            diag.note('room.mode', { roomId: room.id, wanted: payload.mode, got: room.mode ?? null, error: err.message }, { level: 'warn' })
+          }
+        }
+        return { ok: true, room: { id: room.id, name: room.name, members: room.members ?? [], admin: room.admin ?? null, mode: room.mode ?? payload.mode ?? null } }
       }))
     }
 

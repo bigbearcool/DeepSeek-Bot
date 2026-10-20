@@ -32,6 +32,8 @@ data class RoomInfo(
     val members: List<String> = emptyList(),
     val memberNames: List<String> = emptyList(),
     val admin: String? = null,
+    /** "everyone" | "admin" | null — same as ds-bot room.mode; phone creates everyone. */
+    val mode: String? = null,
     val preview: String? = null,
 )
 

@@ -176,11 +176,12 @@ class BridgeApi(
         suspend fun addMembers(accessToken: String, roomId: String, ids: List<String>): RoomInfo =
             parseRoom(postJson("/rooms/update", JSONObject().put("id", roomId).put("add", org.json.JSONArray(ids)), accessToken).getJSONObject("room"))
 
-        /** Remove one member or rename the group (ds-bot update-room via the computer). */
-        suspend fun updateRoom(accessToken: String, roomId: String, name: String? = null, remove: List<String> = emptyList()): RoomInfo {
+        /** Remove one member, rename, or set reply mode (ds-bot update-room via the computer). */
+        suspend fun updateRoom(accessToken: String, roomId: String, name: String? = null, remove: List<String> = emptyList(), mode: String? = null): RoomInfo {
             val body = JSONObject().put("id", roomId)
             if (name != null) body.put("name", name)
             if (remove.isNotEmpty()) body.put("remove", org.json.JSONArray(remove))
+            if (mode == "everyone" || mode == "admin") body.put("mode", mode)
             return parseRoom(postJson("/rooms/update", body, accessToken).getJSONObject("room"))
         }
 

@@ -480,18 +480,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ---- batch 4: remove member, rename group ----
+    // ---- batch 4: remove member, rename group; group @ fix: reply mode ----
     fun removeMember(botId: String) = changeRoom(remove = listOf(botId))
     fun renameRoom(name: String) { if (name.isNotBlank()) changeRoom(name = name.trim()) }
-    private fun changeRoom(name: String? = null, remove: List<String> = emptyList()) {
+    /** Align with ds-bot everyone/admin: everyone → all reply; admin → admin first. */
+    fun setRoomMode(mode: String) { if (mode == "everyone" || mode == "admin") changeRoom(mode = mode) }
+    private fun changeRoom(name: String? = null, remove: List<String> = emptyList(), mode: String? = null) {
         val room = _state.value.selectedRoom ?: return
         if (_state.value.saving) return
         _state.update { it.copy(saving = true, formError = null) }
         viewModelScope.launch {
-            runCatching { auth.withAccess { token, api -> api.updateRoom(token, room.id, name, remove) } }
+            runCatching { auth.withAccess { token, api -> api.updateRoom(token, room.id, name, remove, mode) } }
                 .onSuccess { r ->
                     _state.update { s ->
-                        val next = (s.selectedRoom ?: room).copy(name = r.name.ifBlank { name ?: room.name }, members = r.members.ifEmpty { room.members - remove.toSet() })
+                        val next = (s.selectedRoom ?: room).copy(
+                            name = r.name.ifBlank { name ?: room.name },
+                            members = r.members.ifEmpty { room.members - remove.toSet() },
+                            mode = r.mode ?: mode ?: room.mode,
+                            admin = r.admin ?: room.admin,
+                        )
                         s.copy(saving = false, selectedRoom = next, rooms = s.rooms.map { if (it.id == next.id) next else it },
                             chats = s.chats.map { if (it.kind == "room" && it.id == next.id) it.copy(name = next.name) else it })
                     }
@@ -904,7 +911,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun sendRoomMessage() {
         val st = _state.value
         val room = st.selectedRoom ?: return
-        val text = st.composeText.trim()
+        // ds-bot only parses ASCII @; Chinese IMEs often insert ＠ — normalize before send.
+        val text = st.composeText.trim().replace('＠', '@')
         if (!st.canSend) return
         val picked = st.pending
         val clientId = "m-" + UUID.randomUUID().toString()

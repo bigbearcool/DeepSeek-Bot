@@ -32,6 +32,7 @@ fun parseRoom(o: JSONObject) = RoomInfo(
     members = o.optJSONArray("members").strings(),
     memberNames = o.optJSONArray("memberNames").strings(),
     admin = o.optStringOrNull("admin"),
+    mode = o.optStringOrNull("mode"),
     preview = o.optStringOrNull("preview"),
 )
 

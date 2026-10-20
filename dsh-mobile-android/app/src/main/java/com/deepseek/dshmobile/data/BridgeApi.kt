@@ -94,8 +94,9 @@ class BridgeApi(
             )
         }
 
-        suspend fun send(accessToken: String, botId: String, text: String): SendResponse {
+        suspend fun send(accessToken: String, botId: String, text: String, clientMessageId: String? = null): SendResponse {
             val body = JSONObject().put("botId", botId).put("text", text)
+            if (clientMessageId != null) body.put("clientMessageId", clientMessageId)
             val (code, json) = postJsonRaw("/chats/send", body, accessToken)
             return SendResponse(
                 ok = json.optBoolean("ok", code in 200..299),
@@ -104,6 +105,7 @@ class BridgeApi(
                 stub = json.optBoolean("stub", false),
                 reason = json.optStringOrNull("reason")
                     ?: json.optJSONObject("error")?.optStringOrNull("message"),
+                duplicate = json.optBoolean("duplicate", false),
             )
         }
 
@@ -195,6 +197,8 @@ class BridgeApi(
 
         /** Short-timeout client for REST (not SSE). */
         fun restClient(): OkHttpClient = OkHttpClient.Builder()
+            // Never silently replay a POST (e.g. /chats/send) on a stale connection.
+            .retryOnConnectionFailure(false)
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)

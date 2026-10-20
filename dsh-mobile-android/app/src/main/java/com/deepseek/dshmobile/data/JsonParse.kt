@@ -30,6 +30,7 @@ fun parseChatItem(o: JSONObject) = ChatItem(
     botId = o.optStringOrNull("botId"),
     name = o.optStringOrNull("name"),
     images = if (o.has("images")) o.optInt("images") else null,
+    clientMessageId = o.optStringOrNull("clientMessageId"),
 )
 
 fun cursorToQuery(cursor: Any?): String? = when (cursor) {

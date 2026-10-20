@@ -40,6 +40,10 @@ data class ChatItem(
     val botId: String? = null,
     val name: String? = null,
     val images: Int? = null,
+    /** Client-generated id for messages sent from this phone (echoed by bridge >= 0.0.8). */
+    val clientMessageId: String? = null,
+    /** True while a locally inserted item has not yet been confirmed by the server. */
+    val local: Boolean = false,
 )
 
 data class HistoryResponse(
@@ -58,6 +62,10 @@ data class SendResponse(
     val sessionId: String?,
     val stub: Boolean,
     val reason: String?,
+    val duplicate: Boolean = false,
 )
 
 class BridgeError(message: String, val status: Int? = null) : Exception(message)
+
+/** Device token can no longer be renewed (revoked, or refresh token rejected). Re-pair needed. */
+class AuthRevokedError(message: String) : Exception(message)

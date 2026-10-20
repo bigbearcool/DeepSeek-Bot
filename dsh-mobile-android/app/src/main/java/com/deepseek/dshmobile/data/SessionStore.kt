@@ -20,6 +20,7 @@ class SessionStore(private val context: Context) {
         val accessToken = stringPreferencesKey("access_token")
         val accessExpiresAt = longPreferencesKey("access_expires_at")
         val deviceLabel = stringPreferencesKey("device_label")
+        val lastBotId = stringPreferencesKey("last_bot_id")
     }
 
     val snapshot: Flow<SessionSnapshot> = context.dataStore.data.map { prefs ->
@@ -30,7 +31,13 @@ class SessionStore(private val context: Context) {
             accessToken = prefs[Keys.accessToken].orEmpty(),
             accessExpiresAt = prefs[Keys.accessExpiresAt] ?: 0L,
             deviceLabel = prefs[Keys.deviceLabel].orEmpty(),
+            lastBotId = prefs[Keys.lastBotId].orEmpty(),
+            loaded = true,
         )
+    }
+
+    suspend fun setLastBotId(id: String?) {
+        context.dataStore.edit { if (id.isNullOrBlank()) it.remove(Keys.lastBotId) else it[Keys.lastBotId] = id }
     }
 
     suspend fun current(): SessionSnapshot = snapshot.first()
@@ -69,6 +76,7 @@ class SessionStore(private val context: Context) {
             it.remove(Keys.refreshToken)
             it.remove(Keys.accessToken)
             it.remove(Keys.accessExpiresAt)
+            it.remove(Keys.lastBotId)
         }
     }
 
@@ -84,6 +92,8 @@ data class SessionSnapshot(
     val accessToken: String,
     val accessExpiresAt: Long,
     val deviceLabel: String,
+    val lastBotId: String = "",
+    val loaded: Boolean = false,
 ) {
     val isPaired: Boolean get() = deviceId.isNotBlank() && refreshToken.isNotBlank()
     fun accessValid(now: Long = System.currentTimeMillis(), skewMs: Long = 60_000): Boolean =

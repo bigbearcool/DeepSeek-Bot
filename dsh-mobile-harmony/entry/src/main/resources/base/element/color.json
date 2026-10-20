@@ -1,0 +1,10 @@
+{ "color": [
+  { "name": "start_window_background", "value": "#000A25" },
+  { "name": "bg", "value": "#FCFCFC" },
+  { "name": "card", "value": "#FFFFFF" },
+  { "name": "text", "value": "#1A1A1A" },
+  { "name": "sub", "value": "#8A8F99" },
+  { "name": "line", "value": "#ECECEC" },
+  { "name": "accent", "value": "#3B6CF6" },
+  { "name": "mine", "value": "#E8EFFF" }
+] }

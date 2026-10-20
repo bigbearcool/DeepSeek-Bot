@@ -1,0 +1,138 @@
+{
+ "source": "real ds-bot 0.1.7 on dsh 0.2.1-rc.2, captured 2026-10-20 on the Mac mini (temp DSH_HOME, test model)",
+ "roomSessionId": "session-5416a2ec-e74d-4f86-8c91-f61eff034818",
+ "relayCall": {
+  "type": "tool/call",
+  "seq": 26,
+  "time": 1792457359107,
+  "data": {
+   "turn": 2,
+   "step": 1,
+   "callId": "toolu_relay_34a3593e50d249c69e7e96fa58622c4d",
+   "name": "group_relay",
+   "arguments": "{}"
+  }
+ },
+ "relayResultOk": {
+  "type": "tool/result",
+  "seq": 27,
+  "time": 1792457359737,
+  "data": {
+   "turn": 2,
+   "step": 1,
+   "message": {
+    "role": "tool",
+    "source": {
+     "kind": "tool",
+     "callId": "toolu_relay_34a3593e50d249c69e7e96fa58622c4d"
+    },
+    "toolCallId": "toolu_relay_34a3593e50d249c69e7e96fa58622c4d",
+    "content": [
+     {
+      "type": "text",
+      "text": "{\"replies\":[{\"botId\":\"session-03954678-fe66-4ef8-ad53-8e60850db22b\",\"name\":\"阿甲\",\"text\":\"收到，这是测试回复。\",\"time\":1792457359733}],\"passed\":[]}"
+     }
+    ],
+    "isError": false,
+    "id": "456f7ae3-c1f8-40ff-a303-a93f5e04b3e8"
+   }
+  }
+ },
+ "relayResultFailed": {
+  "type": "tool/result",
+  "seq": 39,
+  "time": 1792457480742,
+  "data": {
+   "turn": 3,
+   "step": 1,
+   "message": {
+    "role": "tool",
+    "source": {
+     "kind": "tool",
+     "callId": "toolu_relay_702e4cceb4e644cc9661f8be703f08eb"
+    },
+    "toolCallId": "toolu_relay_702e4cceb4e644cc9661f8be703f08eb",
+    "content": [
+     {
+      "type": "text",
+      "text": "{\"replies\":[{\"kind\":\"failed\",\"botId\":\"session-03954678-fe66-4ef8-ad53-8e60850db22b\",\"name\":\"阿甲\",\"code\":\"UNKNOWN\",\"text\":\"LlmError code must be a non-empty string\",\"time\":1792457480740}],\"passed\":[],\"failed\":[\"阿甲\"]}"
+     }
+    ],
+    "isError": false,
+    "id": "03438887-19c8-4749-b1ba-c7ea691c3158"
+   }
+  }
+ },
+ "state": {
+  "version": 1,
+  "revision": 20,
+  "mainBotIds": [
+   "session-c9ad8ea2-3892-4e04-b5ee-24363171cbbb"
+  ],
+  "bots": {
+   "session-c9ad8ea2-3892-4e04-b5ee-24363171cbbb": {
+    "id": "session-c9ad8ea2-3892-4e04-b5ee-24363171cbbb",
+    "name": "Chief"
+   },
+   "session-03954678-fe66-4ef8-ad53-8e60850db22b": {
+    "id": "session-03954678-fe66-4ef8-ad53-8e60850db22b",
+    "name": "阿甲"
+   },
+   "session-3b53df8a-b138-49ed-80d4-fd8d68522c07": {
+    "id": "session-3b53df8a-b138-49ed-80d4-fd8d68522c07",
+    "name": "阿乙"
+   }
+  },
+  "rooms": {
+   "session-5416a2ec-e74d-4f86-8c91-f61eff034818": {
+    "id": "session-5416a2ec-e74d-4f86-8c91-f61eff034818",
+    "name": "测试群",
+    "named": true,
+    "members": [
+     "session-03954678-fe66-4ef8-ad53-8e60850db22b",
+     "session-3b53df8a-b138-49ed-80d4-fd8d68522c07"
+    ],
+    "admin": "session-03954678-fe66-4ef8-ad53-8e60850db22b",
+    "mode": "admin",
+    "createdAt": 1792457348922,
+    "seq": 5,
+    "log": [
+     {
+      "who": "阿甲",
+      "botId": "session-03954678-fe66-4ef8-ad53-8e60850db22b",
+      "text": "收到，这是测试回复。",
+      "seq": 1
+     },
+     {
+      "who": "User",
+      "text": "大家好",
+      "seq": 2
+     },
+     {
+      "who": "阿甲",
+      "botId": "session-03954678-fe66-4ef8-ad53-8e60850db22b",
+      "text": "收到，这是测试回复。",
+      "seq": 3
+     },
+     {
+      "who": "User",
+      "text": "再说一句",
+      "seq": 4
+     },
+     {
+      "who": "User",
+      "text": "第三句",
+      "seq": 5
+     }
+    ],
+    "sessions": {
+     "session-03954678-fe66-4ef8-ad53-8e60850db22b": "session-4a3db536-decf-4557-b92e-f600618b8556"
+    },
+    "seen": {
+     "session-03954678-fe66-4ef8-ad53-8e60850db22b": 5
+    }
+   }
+  },
+  "exchangeTurns": {}
+ }
+}

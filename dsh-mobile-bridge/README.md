@@ -139,3 +139,18 @@ connection `fetchRoutes`), so ds-bot validates exactly as on the desktop:
 | `POST /rooms/create` | `create-room` (admin first, `greet: true`, optional name) — same as the desktop form |
 
 Only these ds-bot endpoints are reachable (`DSBOT_ALLOWED`); without ds-bot loaded they answer 503.
+
+## Group chat diagnostics (0.0.10)
+
+`GET /api/mobile-bridge/v1/diagnostics[?roomId=<group id>]` with a device `Authorization: Bearer <access token>`
+(401 without). It answers, in one JSON:
+
+- `dsbot`: whether ds-bot's in-process `/api/bot` route is found through `ctx.connection.fetchRoutes` (`usable`).
+- `stateFile` vs `dsbotState`: the state.json the bridge reads (path, size, mtime, revision) and the revision ds-bot
+  itself reports; `sameStateFile: false` means the bridge reads a file ds-bot does not write.
+- `room`: the group's seq, member Sessions and last 6 log lines (short heads only); `roomProgress`: the round now running.
+- `feed`: phones connected / watching which group, poll running, last seq published, rounds open.
+- `diag.events`: the last marks of every stage: `send.ok|send.fail` → `round.start` → `stream.start` → `poll.line` →
+  `publish` → `round.end` (with `replied`, `failed`, `passed`). The stage after the last mark is where it stops.
+
+The important marks also go to stderr as `[mobile-bridge] [group] ...` (docker logs / the terminal running dsh).

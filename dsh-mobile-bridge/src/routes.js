@@ -1,5 +1,7 @@
 import { API_PREFIX, AVATAR_SHAPES, FORM_LIMITS, INK_HEX, NAME, VERSION, appUrlOf, cleanHttpUrl } from './constants.js'
 import { DsBotError } from './dsbot-api.js'
+import { head } from './diag.js'
+import { stat } from 'node:fs/promises'
 import { zhMessage } from './messages-zh.js'
 import { lanUrl } from './lan.js'
 import { bearer, error, html, json, pathOf, readJson } from './http.js'
@@ -69,6 +71,7 @@ async function dsCall(run) {
  */
 export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
   const { store, adapter, feed, dsbot } = rt
+  const diag = rt.diag ?? { note() {}, snapshot: () => ({}) }
   const resolveUrls = async () => {
     const s = await store.getSettings()
     const publicUrl = cleanHttpUrl(s.publicUrl) || appUrlOf(rt.config)
@@ -104,6 +107,69 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
     const active = await store.activePair()
     if (active) return active
     return store.beginPair()
+  }
+
+  /**
+   * Where a group message stops, in one answer: is ds-bot's route reachable in-process,
+   * which state.json the bridge reads and whether ds-bot itself agrees on its revision,
+   * the group's latest log lines, a round now running, phones watching, and the recent
+   * marks of every stage (diag.js). No message text beyond short heads, no tokens.
+   */
+  async function diagnostics(roomId) {
+    const out = { version: VERSION, surface, now: Date.now() }
+    out.dsbot = dsbot?.probe?.() ?? null
+    const file = { path: adapter.statePath }
+    try {
+      const info = await stat(adapter.statePath)
+      file.exists = true
+      file.size = info.size
+      file.mtime = info.mtimeMs
+    } catch (err) {
+      file.exists = false
+      file.error = err?.code ?? String(err?.message ?? err)
+    }
+    let state = null
+    try { state = await adapter.readState() } catch (err) { file.readError = String(err?.message ?? err) }
+    if (state) {
+      file.revision = state.revision ?? null
+      file.rooms = Object.keys(state.rooms ?? {}).length
+      file.bots = Object.keys(state.bots ?? {}).length
+    }
+    out.stateFile = file
+    // ds-bot's own view: same revision means the bridge reads the file ds-bot writes.
+    if (out.dsbot?.usable) {
+      try {
+        const live = await dsbot.call('state', {})
+        out.dsbotState = {
+          revision: live?.revision ?? null,
+          readOnly: live?.readOnly ?? null,
+          rooms: Array.isArray(live?.rooms) ? live.rooms.length : null,
+          roomsWorking: live?.work?.rooms ?? null,
+        }
+        out.sameStateFile = file.revision !== undefined && live?.revision !== undefined
+          ? Math.abs(Number(live.revision) - Number(file.revision)) <= 1 : null
+      } catch (err) {
+        out.dsbotState = { error: err.message, code: err.code ?? null }
+      }
+    }
+    if (roomId) {
+      const room = state?.rooms?.[roomId]
+      out.room = room ? {
+        id: roomId,
+        name: room.name ?? '',
+        mode: room.mode ?? null,
+        members: room.members ?? [],
+        memberSessions: room.sessions ?? {},
+        seq: room.seq ?? null,
+        last: (room.log ?? []).slice(-6).map(line => ({ seq: line.seq ?? null, who: line.botId ? 'member' : line.who === 'User' ? 'user' : 'other', botId: line.botId ?? null, kind: line.kind ?? null, text: head(line.text, 16) })),
+      } : { id: roomId, missing: true }
+      if (out.dsbot?.usable) {
+        try { out.roomProgress = await dsbot.call('room-progress', { roomId }) } catch (err) { out.roomProgress = { error: err.message } }
+      }
+    }
+    out.feed = feed.status?.() ?? null
+    out.diag = diag.snapshot({ roomId })
+    return out
   }
 
   const handle = async (request, info = {}) => {
@@ -331,10 +397,17 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
           // Only rooms ds-bot knows: a bot id or a plain Session id is not a group chat.
           await adapter.roomHistory({ roomId })
         } catch (err) {
+          diag.note('send.fail', { roomId, stage: 'room', status: err.status ?? 500, error: err.message }, { level: 'warn' })
           return error(err.status ?? 500, err.message)
         }
         return dsCall(async () => {
-          await dsbot.call('send', { sessionId: roomId, text })
+          try {
+            await dsbot.call('send', { sessionId: roomId, text })
+          } catch (err) {
+            diag.note('send.fail', { roomId, stage: 'ds-bot', status: err.status ?? 500, code: err.code ?? null, error: err.message }, { level: 'warn' })
+            throw err
+          }
+          diag.note('send.ok', { roomId, deviceId: device.id, text: head(text, 12), clientMessageId }, { level: 'info' })
           const out = { ok: true, roomId, ...(clientMessageId ? { clientMessageId } : {}) }
           if (key) {
             recentSends.set(key, out)
@@ -351,10 +424,16 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
         const url = new URL(request.url)
         const botId = url.searchParams.get('botId') || null
         const roomId = url.searchParams.get('roomId') || null
+        const sinceRaw = url.searchParams.get('since')
+        const since = sinceRaw !== null && /^\d{1,12}$/.test(sinceRaw) ? Number(sinceRaw) : null
         // Default: live feed from session/agent events. ?mode=test keeps hello+test ticks.
         const test = url.searchParams.get('mode') === 'test'
-        return feed.openStream(request, { device, botId, roomId, test })
+        return feed.openStream(request, { device, botId, roomId, since, test })
       })
+    }
+
+    if (method === 'GET' && sub === '/diagnostics') {
+      return withAuth(request, async () => json({ ok: true, ...(await diagnostics(new URL(request.url).searchParams.get('roomId') || null)) }))
     }
 
     if (method === 'GET' && sub === '/devices') {
@@ -400,6 +479,7 @@ export function installRoutes(rt) {
     ['/rooms/history', ['GET']],
     ['/rooms/send', ['POST']],
     ['/stream', ['GET']],
+    ['/diagnostics', ['GET']],
     ['/devices', ['GET']],
     ['/devices/revoke', ['POST']],
     ['/settings', ['GET', 'POST']],

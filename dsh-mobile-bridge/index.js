@@ -1,8 +1,10 @@
-import { join } from 'node:path'
+import { homedir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { NAME, VERSION } from './src/constants.js'
 import { createStore } from './src/store.js'
 import { createDsBotAdapter } from './src/dsbot-adapter.js'
 import { createDsBotApi } from './src/dsbot-api.js'
+import { createDiag } from './src/diag.js'
 import { createLiveFeed } from './src/live-feed.js'
 import { installRoutes } from './src/routes.js'
 import { startDeviceServer } from './src/device-server.js'
@@ -10,9 +12,12 @@ import { startDeviceServer } from './src/device-server.js'
 export const name = NAME
 export const inject = ['connection', 'sessionController']
 
-function dshHomeOf(envHome) {
-  if (envHome) return envHome
-  return join(process.env.HOME ?? process.env.USERPROFILE ?? '.', '.dsh')
+/** Same reading as ds-bot's folders.dshHomeOf, so both open the same state.json. */
+export function dshHomeOf(envHome) {
+  const value = typeof envHome === 'string' ? envHome.trim() : ''
+  const raw = value || join(homedir(), '.dsh')
+  const expanded = raw === '~' ? homedir() : raw.startsWith('~/') || raw.startsWith('~\\') ? join(homedir(), raw.slice(2)) : raw
+  return resolve(expanded)
 }
 
 export function apply(ctx, config = {}) {
@@ -24,7 +29,8 @@ export function createRuntime(ctx, config = {}) {
   const home = config.home ?? join(dshHome, 'mobile-bridge')
   const botHome = config.botHome ?? join(dshHome, 'bot')
   const adapter = createDsBotAdapter({ dshHome, botHome, ctx })
-  const feed = createLiveFeed({ ctx, adapter })
+  const diag = createDiag({ logger: ctx.logger, name: NAME, ...(config.quietDiag ? { print: null } : {}) })
+  const feed = createLiveFeed({ ctx, adapter, diag })
   const rt = {
     ctx,
     config,
@@ -33,6 +39,7 @@ export function createRuntime(ctx, config = {}) {
     botHome,
     store: createStore({ home }),
     adapter,
+    diag,
     feed,
     dsbot: createDsBotApi({ ctx }),
   }

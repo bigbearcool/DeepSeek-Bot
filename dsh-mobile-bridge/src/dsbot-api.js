@@ -14,6 +14,8 @@ export const DSBOT_ROUTE = '/api/bot'
 /** ds-bot endpoints the phone may reach. Anything else is refused before ds-bot sees it. */
 export const DSBOT_ALLOWED = new Set([
   'state', 'models', 'efforts', 'folders', 'folder-list', 'create-bot', 'create-room', 'send',
+  // read-only, for GET /diagnostics
+  'room-progress',
 ])
 
 export class DsBotError extends Error {
@@ -67,5 +69,25 @@ export function createDsBotApi({ ctx, route = DSBOT_ROUTE } = {}) {
     throw new DsBotError(body.error?.message ?? 'DS Bot refused', STATUS_OF_CODE[code] ?? 400, code)
   }
 
-  return { call, available: () => routeOf() !== undefined }
+  /** What the lookup sees, for GET /diagnostics. */
+  function probe() {
+    const connection = ctx?.connection
+    const routes = connection?.fetchRoutes
+    const out = {
+      connection: connection !== undefined && connection !== null,
+      fetchRoutes: routes === undefined ? 'missing' : typeof routes?.get === 'function' ? 'map' : typeof routes,
+      routeCount: typeof routes?.size === 'number' ? routes.size : null,
+    }
+    try {
+      const found = typeof routes?.get === 'function' ? routes.get(route) : undefined
+      out.dsbotRoute = found ? { fetch: typeof found.fetch === 'function', methods: found.methods ? [...found.methods] : null } : null
+    } catch (error) {
+      out.dsbotRoute = null
+      out.error = String(error?.message ?? error)
+    }
+    out.usable = routeOf() !== undefined
+    return out
+  }
+
+  return { call, probe, available: () => routeOf() !== undefined }
 }

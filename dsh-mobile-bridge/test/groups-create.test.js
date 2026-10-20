@@ -81,7 +81,7 @@ function start({ withDsBot = true, state = STATE } = {}) {
   const sessionController = { prompt: async () => {}, page: async () => ({ hasMore: false, records: [] }) }
   const ctx = fakeContext({ services: { sessionController }, fetchRoutes: withDsBot ? ds.routes : undefined })
   ctx.sessionController = sessionController
-  const rt = apply(ctx, { dshHome, home: join(dshHome, 'mobile-bridge'), botHome, devicePort: false })
+  const rt = apply(ctx, { dshHome, home: join(dshHome, 'mobile-bridge'), botHome, devicePort: false, quietDiag: true })
   const call = (m, p, o) => dispatch(ctx.routes, m, `${P}${p}`, o)
   return {
     ctx, rt, ds, botHome, call,

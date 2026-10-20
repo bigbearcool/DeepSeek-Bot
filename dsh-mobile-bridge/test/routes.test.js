@@ -54,7 +54,7 @@ function start({ bots, page } = {}) {
   }
   const ctx = fakeContext({ services: { sessionController } })
   ctx.sessionController = sessionController
-  apply(ctx, { dshHome, home: join(dshHome, 'mobile-bridge'), botHome, devicePort: false })
+  apply(ctx, { dshHome, home: join(dshHome, 'mobile-bridge'), botHome, devicePort: false, quietDiag: true })
   return {
     ctx,
     prompts,
@@ -91,7 +91,7 @@ test('health is open', async (t) => {
   const { status, body } = await h.json('GET', '/api/mobile-bridge/v1/health')
   assert.equal(status, 200)
   assert.equal(body.name, 'dsh-mobile-bridge')
-  assert.equal(body.version, '0.0.9')
+  assert.equal(body.version, '0.0.10')
   assert.equal(body.ok, true)
 })
 

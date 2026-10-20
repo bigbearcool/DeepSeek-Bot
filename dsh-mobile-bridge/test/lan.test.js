@@ -7,7 +7,7 @@ const ifaces = {
   docker0: [{ family: 'IPv4', address: '172.17.0.1', internal: false }],
   'br-abc': [{ family: 'IPv4', address: '172.18.0.1', internal: false }],
   utun3: [{ family: 'IPv4', address: '10.8.0.2', internal: false }],
-  en1: [{ family: 'IPv4', address: '10.0.0.9', internal: false }],
+  en1: [{ family: 'IPv4', address: '10.0.0.10', internal: false }],
   en0: [
     { family: 'IPv6', address: 'fe80::1', internal: false },
     { family: 'IPv4', address: '169.254.3.3', internal: false },
@@ -16,7 +16,7 @@ const ifaces = {
 }
 
 test('lanAddresses skips loopback/docker/virtual and prefers 192.168', () => {
-  assert.deepEqual(lanAddresses(ifaces), ['192.168.1.23', '10.0.0.9'])
+  assert.deepEqual(lanAddresses(ifaces), ['192.168.1.23', '10.0.0.10'])
 })
 
 test('lanUrl: wildcard host → detected IP; loopback host → empty; explicit host kept', () => {

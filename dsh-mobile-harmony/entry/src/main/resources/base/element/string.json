@@ -1,0 +1,5 @@
+{ "string": [
+  { "name": "module_desc", "value": "和电脑上的助手聊天" },
+  { "name": "EntryAbility_desc", "value": "和电脑上的助手聊天" },
+  { "name": "EntryAbility_label", "value": "DSH" }
+] }

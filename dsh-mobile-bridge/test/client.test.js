@@ -11,7 +11,7 @@ const CLIENT = join(ROOT, 'client.js')
 const PKG = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
 
 test('package is 0.0.14 with web client + sidebar inject', () => {
-  assert.equal(PKG.version, '0.0.14')
+  assert.equal(PKG.version, '0.0.15')
   assert.equal(PKG.exports['./client'], './client.js')
   assert.equal(PKG.dsh?.client?.platform, 'web')
   assert.ok(PKG.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-sidebar'))

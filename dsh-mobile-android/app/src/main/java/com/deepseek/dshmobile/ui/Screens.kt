@@ -52,6 +52,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
@@ -115,6 +116,7 @@ import com.deepseek.dshmobile.data.ChatEntry
 import com.deepseek.dshmobile.data.ChatItem
 import com.deepseek.dshmobile.data.ChatListLogic
 import com.deepseek.dshmobile.data.Look
+import com.deepseek.dshmobile.data.Mentions
 import com.deepseek.dshmobile.data.RoomInfo
 import com.deepseek.dshmobile.data.RoomStreams
 import com.deepseek.dshmobile.data.WaitPhase
@@ -583,6 +585,7 @@ fun ChatScreen(
     onReply: (ReplyTarget?) -> Unit = {},
     onAttach: (String) -> Unit = {},
     onInfo: () -> Unit = {},
+    onPickMention: (String) -> Unit = {},
 ) {
     val c = LocalDs.current
     val list = rememberLazyListState()
@@ -697,11 +700,17 @@ fun ChatScreen(
         }
         state.replyTo?.let { r -> ReplyChip(r, onClose = { onReply(null) }) }
         PendingStrip(state.pending)
+        val mentionMembers = if (state.inRoom) {
+            val ids = state.selectedRoom?.members.orEmpty()
+            state.bots.filter { it.id in ids }
+        } else emptyList()
         Composer(
             state.composeText, state.sending, onComposeChange, onSend,
             hint = Look.inputHint(if (state.inRoom) state.chatTitle else state.selectedBot?.name, state.inRoom),
             showStop = state.showStop, stopping = state.stopping, onStop = onStop, onVoice = onVoice, onAttach = onAttach,
             hasAttachments = state.pending.isNotEmpty(), uploading = state.pending.any { !it.ready },
+            mentionMembers = mentionMembers,
+            onPickMention = onPickMention,
         )
     }
     state.viewer?.let { v -> ImageViewer(v, attachUi.closeViewer) }
@@ -977,7 +986,8 @@ fun WaitCard(wait: WaitState, onDismiss: () -> Unit, bot: BotInfo? = null, inRoo
     if (!hideWorking) WorkingLine(listOfNotNull(bot?.name), bot?.id, bot?.color, inRoom)
 }
 
-/** Input bar: round + on the left (files / camera / pictures); white pill with hint and mic; black round button: voice, send, or stop. */
+/** Input bar: round + on the left (files / camera / pictures); white pill with hint and mic; black round button: voice, send, or stop.
+ *  In a group chat, typing "@" opens a member picker (same "@Name " text ds-bot reads). */
 @Composable
 private fun Composer(
     text: String, sending: Boolean, onChange: (String) -> Unit, onSend: () -> Unit,
@@ -986,13 +996,49 @@ private fun Composer(
     onAttach: (String) -> Unit = {},
     hasAttachments: Boolean = false,
     uploading: Boolean = false,
+    mentionMembers: List<BotInfo> = emptyList(),
+    onPickMention: (String) -> Unit = {},
 ) {
     val c = LocalDs.current
     val canSend = (text.isNotBlank() || hasAttachments) && !uploading && !sending
     val stopMode = showStop && text.isBlank() && !hasAttachments && !sending
     var plus by remember { mutableStateOf(false) }
+    val active = if (mentionMembers.isNotEmpty()) Mentions.activeAt(text) else null
+    val mentionRows = active?.let { Mentions.rows(mentionMembers, it.query) }.orEmpty()
+    Column(Modifier.fillMaxWidth().background(c.bg)) {
+    if (mentionRows.isNotEmpty()) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                .shadow(if (c.dark) 0.dp else 4.dp, RoundedCornerShape(14.dp), clip = false)
+                .clip(RoundedCornerShape(14.dp)).background(c.card)
+                .then(if (c.dark) Modifier.border(1.dp, c.line, RoundedCornerShape(14.dp)) else Modifier)
+                .heightIn(max = 220.dp).verticalScroll(rememberScrollState()),
+        ) {
+            mentionRows.forEachIndexed { i, row ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { onPickMention(row.insert) }.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (row.everyone) {
+                        Box(Modifier.size(32.dp).clip(CircleShape).background(c.group), contentAlignment = Alignment.Center) {
+                            Text("@", color = c.ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    } else {
+                        Avatar(row.name, 32, mentionMembers.find { it.id == row.id }?.color, key = row.id)
+                    }
+                    Spacer(Modifier.size(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(row.name, color = c.ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(if (row.everyone) "群里每位助手都会回复" else "只让这位助手回复", color = c.ink3, fontSize = 12.sp)
+                    }
+                }
+                if (i < mentionRows.lastIndex) Box(Modifier.fillMaxWidth().padding(start = 58.dp).height(1.dp).background(c.line))
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+    }
     Row(
-        Modifier.fillMaxWidth().background(c.bg).navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.Bottom,
     ) {
         Box(Modifier.padding(bottom = 2.dp)) {
@@ -1047,6 +1093,7 @@ private fun Composer(
                 }
             }
         }
+    }
     }
 }
 

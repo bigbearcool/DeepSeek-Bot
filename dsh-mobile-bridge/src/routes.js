@@ -45,13 +45,16 @@ export function createRoomPayload(body = {}) {
   const admin = str(body.admin)
   const members = admin ? [admin, ...ids.filter(id => id !== admin)] : ids
   const name = str(body.name)?.trim()
-  return { members, ...(admin ? { admin } : {}), greet: true, ...(name ? { name } : {}) }
+  // Phone groups use everyone mode so a plain message (no @) reaches every member —
+  // same rule as ds-bot's "everyone" mode; @Name still picks who answers.
+  const mode = body.mode === 'admin' ? 'admin' : 'everyone'
+  return { members, ...(admin ? { admin } : {}), greet: true, mode, ...(name ? { name } : {}) }
 }
 
 /** The fields the phone may change on a Bot, in ds-bot update-bot form. ds-bot checks every value. */
 export function updateBotPayload(body = {}) {
   const out = { id: str(body.id) ?? '' }
-  for (const key of ['name', 'role', 'instructions']) if (str(body[key]) !== undefined) out[key] = body[key]
+  for (const key of ['name', 'role', 'instructions', 'model', 'effort']) if (str(body[key]) !== undefined) out[key] = body[key]
   if (str(body.color) !== undefined || body.color === null) out.color = body.color
   if (str(body.shape) !== undefined) out.avatar = { shape: body.shape }
   else if (body.shape === null) out.avatar = null
@@ -630,6 +633,8 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
         }
         return dsCall(async () => {
           try {
+            // Text is forwarded as-is: ds-bot reads "@Name" / "@所有人" from it (shared/mentions.js)
+            // to pick who answers. The phone only inserts those strings; it does not send a separate id list.
             if (uploads.length === 0) await dsbot.call('send', { sessionId: roomId, text })
             else {
               // With pictures or files: the same prompt ds-bot's send makes for a group Session,

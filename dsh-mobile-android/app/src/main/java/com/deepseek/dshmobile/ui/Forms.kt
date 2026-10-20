@@ -196,7 +196,7 @@ fun NewBotScreen(
             Field(d.name, { v -> onChange { it.copy(name = v.take(opts.nameMax)) } }, fallback)
             if (d.name.isNotBlank() && problem != null) Text(problem, color = c.danger, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
 
-            Label("模型", if (opts.models.isEmpty()) "电脑上还没有可用的模型，请先在电脑上添加" else "助手用这个模型工作，之后可以在电脑上改")
+            Label("模型", if (opts.models.isEmpty()) "电脑上还没有可用的模型，请先在电脑上添加" else "助手用这个模型工作，之后也可以在资料页改")
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 opts.models.forEach { m ->
                     val on = d.model == m.ref

@@ -95,12 +95,24 @@ fun BotProfileScreen(
     onReset: () -> Unit,
     onText: (String, String) -> Unit,
     onMute: () -> Unit,
+    onModel: (String) -> Unit = {},
 ) {
     val c = LocalDs.current
     val p = state.profile ?: return
     var editInstructions by remember { mutableStateOf(false) }
+    var editModel by remember { mutableStateOf(false) }
     if (editInstructions) {
         InstructionsEditor(p.name, p.instructions, state.saving, onClose = { editInstructions = false }) { onText("instructions", it); editInstructions = false }
+        return
+    }
+    if (editModel) {
+        ModelPicker(
+            models = state.options?.models.orEmpty(),
+            current = p.model,
+            saving = state.saving,
+            onClose = { editModel = false },
+            onPick = { onModel(it); editModel = false },
+        )
         return
     }
     val (shape, color) = Look.lookOf(p.id, p.shape, p.color)
@@ -159,6 +171,19 @@ fun BotProfileScreen(
             Text("这个助手在手机和电脑上都显示成这样", color = c.ink3, fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp, top = 6.dp))
             Spacer(Modifier.height(12.dp))
             SheetCard {
+                val modelLabel = state.options?.models?.find { it.ref == p.model }?.name
+                    ?: p.model?.substringAfterLast('/')?.ifBlank { null }
+                    ?: "未选择"
+                SheetRow(null, "模型", trailing = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(modelLabel, color = c.ink3, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = c.ink3)
+                    }
+                }) { editModel = true }
+            }
+            Text("正在使用的模型，换了之后下一句话就会用新的", color = c.ink3, fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp, top = 6.dp))
+            Spacer(Modifier.height(12.dp))
+            SheetCard {
                 SheetRow(Icons.Outlined.Description, "指令", trailing = {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = c.ink3)
                 }) { editInstructions = true }
@@ -171,6 +196,47 @@ fun BotProfileScreen(
             }
             Text(if (muted) "已关闭：新消息数字显示为灰色" else "新消息会在列表里显示数字", color = c.ink3, fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp, top = 6.dp))
             Spacer(Modifier.height(32.dp))
+        }
+    }
+}
+
+@Composable
+private fun ModelPicker(
+    models: List<com.deepseek.dshmobile.data.ModelOption>,
+    current: String?,
+    saving: Boolean,
+    onClose: () -> Unit,
+    onPick: (String) -> Unit,
+) {
+    val c = LocalDs.current
+    BackHandler(onBack = onClose)
+    Column(Modifier.fillMaxSize().background(c.bg)) {
+        TopRow(back = false, onClose = onClose, title = "模型")
+        Text("选一个这个助手要用的模型。换了之后，下一句话就会用新的。", color = c.ink3, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+        if (models.isEmpty()) {
+            Text("电脑上还没有可用的模型，请先在电脑上添加", color = c.ink3, fontSize = 15.sp, modifier = Modifier.padding(20.dp))
+        } else {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).navigationBarsPadding()) {
+                Spacer(Modifier.height(8.dp))
+                SheetCard {
+                    models.forEachIndexed { i, m ->
+                        val on = m.ref == current
+                        Row(
+                            Modifier.fillMaxWidth().height(52.dp).clickable(enabled = !saving && !on) { onPick(m.ref) }.padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(m.name, color = c.ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                val sub = listOfNotNull(m.providerName, if (on) "正在使用" else null).joinToString(" · ")
+                                if (sub.isNotBlank()) Text(sub, color = if (on) c.accent else c.ink3, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            if (on) Icon(Icons.Filled.Check, "正在使用", tint = c.accent, modifier = Modifier.size(20.dp))
+                        }
+                        if (i < models.lastIndex) Box(Modifier.fillMaxWidth().padding(start = 16.dp).height(1.dp).background(c.line))
+                    }
+                }
+                Spacer(Modifier.height(32.dp))
+            }
         }
     }
 }

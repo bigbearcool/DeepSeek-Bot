@@ -268,6 +268,7 @@ class MainActivity : ComponentActivity() {
                             onReply = vm::setReply,
                             onAttach = ::attach,
                             onInfo = { val r = state.selectedRoom; if (r != null) vm.openGroupInfo() else state.selectedBot?.let { vm.openProfile(it.id) } },
+                            onPickMention = vm::pickMention,
                         ) }
                     }
                     Screen.BotProfile -> {
@@ -280,6 +281,7 @@ class MainActivity : ComponentActivity() {
                             onReset = vm::resetLook,
                             onText = vm::saveText,
                             onMute = { state.profile?.let { vm.toggleMute("bot", it.id) } },
+                            onModel = vm::setModel,
                         )
                     }
                     Screen.GroupInfo -> {

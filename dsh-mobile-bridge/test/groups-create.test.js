@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import { apply } from '../index.js'
 import { roomItem, roomItems } from '../src/chat-format.js'
 import { createDsBotApi, DSBOT_ROUTE } from '../src/dsbot-api.js'
-import { createBotPayload, createRoomPayload } from '../src/routes.js'
+import { createBotPayload, createRoomPayload, updateBotPayload } from '../src/routes.js'
 import { dispatch, fakeContext } from './fake-ctx.js'
 
 const P = '/api/mobile-bridge/v1'
@@ -64,6 +64,13 @@ function fakeDsBot() {
           if ((payload.members ?? []).length < 2) return fail('A group chat needs at least two Bots', 'bot/refused')
           return reply({ id: 'room-new', name: payload.name ?? 'Chief、Writer', members: payload.members, admin: payload.admin, mode: 'admin' })
         case 'send': return reply(true)
+        case 'update-bot': {
+          const bot = STATE.bots[payload.id]
+          if (!bot) return fail('Unknown Bot', 'bot/not-found')
+          if (payload.model !== undefined) bot.model = payload.model
+          if (payload.name !== undefined) bot.name = payload.name
+          return reply({ ...bot, avatar: bot.avatar ?? null })
+        }
         default: return fail(`Unknown endpoint ${endpoint}`, 'bot/not-found')
       }
     },
@@ -173,7 +180,7 @@ test('rooms/create sends admin first with greet, like the desktop form', async (
   const ok = await h.json('POST', '/rooms/create', { headers, body: { admin: 'chief', members: ['writer', 'chief'], name: ' 周报 ' } })
   assert.equal(ok.status, 200)
   assert.equal(ok.body.room.id, 'room-new')
-  assert.deepEqual(h.ds.calls.find(c => c.endpoint === 'create-room').payload, { members: ['chief', 'writer'], admin: 'chief', greet: true, name: '周报' })
+  assert.deepEqual(h.ds.calls.find(c => c.endpoint === 'create-room').payload, { members: ['chief', 'writer'], admin: 'chief', greet: true, mode: 'everyone', name: '周报' })
   const few = await h.json('POST', '/rooms/create', { headers, body: { admin: 'chief', members: [] } })
   assert.equal(few.status, 400)
   assert.match(few.body.error.message, /at least two/)
@@ -182,7 +189,8 @@ test('rooms/create sends admin first with greet, like the desktop form', async (
 
 test('payload helpers drop non-string values', () => {
   assert.deepEqual(createBotPayload({ name: 5, role: 'r', avatar: { shape: 3 } }), { role: 'r' })
-  assert.deepEqual(createRoomPayload({ members: ['a', 1, 'b'] }), { members: ['a', 'b'], greet: true })
+  assert.deepEqual(createRoomPayload({ members: ['a', 1, 'b'] }), { members: ['a', 'b'], greet: true, mode: 'everyone' })
+  assert.deepEqual(createRoomPayload({ members: ['a'], admin: 'a', mode: 'admin' }), { members: ['a'], admin: 'a', greet: true, mode: 'admin' })
 })
 
 test('bots/options picks models, presets, colors from ds-bot state without leaking the rest', async (t) => {
@@ -282,4 +290,31 @@ test('3081 listener: new endpoints need the device token', async (t) => {
   }
   const bad = await fetch(base + '/bots/create', { method: 'POST', body: '{"name":"x"}', headers: { Authorization: 'Bearer nope', 'content-type': 'application/json' } })
   assert.equal(bad.status, 401)
+})
+
+
+test('rooms/send keeps @Name in the text for ds-bot to parse (no separate mention ids)', async (t) => {
+  const h = start(); t.after(h.stop)
+  const headers = await authed(h)
+  const text = '@Chief 看一下，也请 @Writer 帮忙'
+  const res = await h.json('POST', '/rooms/send', { headers, body: { roomId: 'room-1', text, clientMessageId: 'at-1' } })
+  assert.equal(res.status, 200)
+  const sends = h.ds.calls.filter(c => c.endpoint === 'send')
+  assert.equal(sends.length, 1)
+  // trim() drops only ends; @Name in the middle stays for ds-bot mentionSpans
+  assert.deepEqual(sends[0].payload, { sessionId: 'room-1', text })
+  assert.match(sends[0].payload.text, /@Chief/)
+  assert.match(sends[0].payload.text, /@Writer/)
+})
+
+test('bots/update forwards model to ds-bot update-bot', async (t) => {
+  const h = start(); t.after(h.stop)
+  const headers = await authed(h)
+  assert.deepEqual(updateBotPayload({ id: 'chief', model: 'deepseek/reason' }), { id: 'chief', model: 'deepseek/reason' })
+  const res = await h.json('POST', '/bots/update', { headers, body: { id: 'chief', model: 'deepseek/reason' } })
+  assert.equal(res.status, 200)
+  const upd = h.ds.calls.filter(c => c.endpoint === 'update-bot')
+  assert.equal(upd.length, 1)
+  assert.equal(upd[0].payload.model, 'deepseek/reason')
+  assert.equal(upd[0].payload.id, 'chief')
 })

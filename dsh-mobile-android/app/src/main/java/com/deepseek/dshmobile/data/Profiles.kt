@@ -11,6 +11,8 @@ data class BotProfile(
     val shape: String?,
     val color: String?,
     val main: Boolean,
+    /** Model ref this Bot runs on (ds-bot update-bot `model`); null if none yet. */
+    val model: String? = null,
 )
 
 /** One search result: a Bot, a group chat, or a message in one of them. */
@@ -24,6 +26,7 @@ fun parseProfile(o: JSONObject) = BotProfile(
     shape = o.optStringOrNull("shape"),
     color = o.optStringOrNull("color"),
     main = o.optBoolean("main", false),
+    model = o.optStringOrNull("model"),
 )
 
 fun parseHits(o: JSONObject): List<SearchHit> = (o.optJSONArray("hits")?.mapObjects() ?: emptyList()).map {

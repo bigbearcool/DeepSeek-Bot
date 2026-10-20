@@ -180,6 +180,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun onBaseUrlChange(v: String) = _state.update { it.copy(baseUrl = v) }
     fun onPairInputChange(v: String) = _state.update { it.copy(pairInput = v) }
     fun onComposeChange(v: String) = _state.update { it.copy(composeText = v) }
+
+    /** Insert "@Name " from the group @ picker (same text ds-bot reads to pick who answers). */
+    fun pickMention(insert: String) = _state.update { st ->
+        val active = com.deepseek.dshmobile.data.Mentions.activeAt(st.composeText) ?: return@update st
+        st.copy(composeText = com.deepseek.dshmobile.data.Mentions.apply(st.composeText, active, insert))
+    }
     /** Text from the phone's own voice input goes after what is already typed. */
     fun addVoiceText(spoken: String) = _state.update { it.copy(composeText = com.deepseek.dshmobile.data.Look.mergeVoice(it.composeText, spoken)) }
     fun showNotice(text: String) = _state.update { it.copy(notice = text) }
@@ -240,10 +246,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _state.update {
             it.copy(
                 screen = Screen.BotProfile, profileBack = back, formError = null,
-                profile = bot?.let { b -> com.deepseek.dshmobile.data.BotProfile(b.id, b.name, b.role.orEmpty(), "", b.shape, b.color, b.main) },
+                profile = bot?.let { b -> com.deepseek.dshmobile.data.BotProfile(b.id, b.name, b.role.orEmpty(), "", b.shape, b.color, b.main, b.model) },
             )
         }
         viewModelScope.launch {
+            // Options list the models the computer offers (same catalog as create-bot).
+            if (_state.value.options == null) runCatching {
+                auth.withAccess { token, api -> api.botOptions(token) }
+            }.onSuccess { opts -> _state.update { it.copy(options = opts) } }
             runCatching { auth.withAccess { token, api -> api.botInfo(token, botId) } }
                 .onSuccess { p -> _state.update { if (it.profile?.id == p.id || it.profile == null) it.copy(profile = p) else it } }
                 .onFailure { e -> if (e is CancellationException) throw e; _state.update { it.copy(formError = friendly(e)) } }
@@ -263,8 +273,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     _state.update { s ->
                         s.copy(
                             saving = false, profile = next.copy(main = p.main),
-                            bots = s.bots.map { if (it.id == next.id) it.copy(name = next.name, role = next.role, color = next.color, shape = next.shape) else it },
-                            selectedBot = s.selectedBot?.let { if (it.id == next.id) it.copy(name = next.name, color = next.color, shape = next.shape) else it },
+                            bots = s.bots.map { if (it.id == next.id) it.copy(name = next.name, role = next.role, color = next.color, shape = next.shape, model = next.model) else it },
+                            selectedBot = s.selectedBot?.let { if (it.id == next.id) it.copy(name = next.name, color = next.color, shape = next.shape, model = next.model) else it },
                             chats = s.chats.map { if (it.kind == "bot" && it.id == next.id) it.copy(name = next.name, color = next.color) else it },
                         )
                     }
@@ -280,6 +290,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun setColor(color: String) = saveProfile(org.json.JSONObject().put("color", color))
     fun resetLook() = saveProfile(org.json.JSONObject().put("shape", org.json.JSONObject.NULL).put("color", org.json.JSONObject.NULL))
     fun saveText(field: String, value: String) = saveProfile(org.json.JSONObject().put(field, value))
+    /** Same as desktop Bot settings → Model: write the ref through update-bot; next message uses it. */
+    fun setModel(ref: String) = saveProfile(org.json.JSONObject().put("model", ref))
 
     // ---- batch 3: group info, add member ----
     fun openGroupInfo() = _state.update { it.copy(screen = Screen.GroupInfo, formError = null) }

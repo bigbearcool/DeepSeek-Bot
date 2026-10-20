@@ -61,7 +61,7 @@ async function authed(h) {
 
 test('updateBotPayload keeps only the editable fields, in ds-bot form', () => {
   assert.deepEqual(updateBotPayload({ id: 'a', name: 'N', role: '', instructions: 'x', color: 'red', shape: 'star', model: 'm', main: true }),
-    { id: 'a', name: 'N', role: '', instructions: 'x', color: 'red', avatar: { shape: 'star' } })
+    { id: 'a', name: 'N', role: '', instructions: 'x', model: 'm', color: 'red', avatar: { shape: 'star' } })
   assert.deepEqual(updateBotPayload({ id: 'a', color: null, shape: null }), { id: 'a', color: null, avatar: null })
   assert.deepEqual(updateRoomPayload({ id: 'r', add: ['b', 3, ''], remove: [], members: ['x'], mode: 'free' }), { id: 'r', add: ['b'] })
 })
@@ -101,7 +101,7 @@ test('bots/update goes through ds-bot update-bot and passes its refusals on', as
   const ok = await h.json('POST', '/bots/update', { headers, body: { id: 'chief', shape: 'star', color: 'red', model: 'evil' } })
   assert.equal(ok.status, 200)
   assert.equal(ok.body.bot.shape, 'star')
-  assert.deepEqual(h.calls.at(-1), { endpoint: 'update-bot', payload: { id: 'chief', color: 'red', avatar: { shape: 'star' } } })
+  assert.deepEqual(h.calls.at(-1), { endpoint: 'update-bot', payload: { id: 'chief', model: 'evil', color: 'red', avatar: { shape: 'star' } } })
   const bad = await h.json('POST', '/bots/update', { headers, body: { id: 'chief', shape: 'nope' } })
   assert.equal(bad.status, 400)
   assert.ok(JSON.stringify(bad.body).includes('bot/invalid'))

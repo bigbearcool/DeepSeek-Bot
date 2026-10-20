@@ -11,8 +11,8 @@ android {
         applicationId = "com.deepseek.dshmobile"
         minSdk = 26
         targetSdk = 34
-        versionCode = 12
-        versionName = "0.2.1"
+        versionCode = 13
+        versionName = "0.2.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "DEFAULT_BASE_URL", "\"\"")
     }

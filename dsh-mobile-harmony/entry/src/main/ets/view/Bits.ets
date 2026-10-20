@@ -80,3 +80,47 @@ export struct MdText {
     .alignItems(HorizontalAlign.Start)
   }
 }
+
+/** A picture in a message: loads from the computer once, then from the phone. */
+@Component
+export struct AttImage {
+  @Prop attId: string = '';
+  @Prop localUri: string = '';
+  @State uri: string = '';
+  @State failed: boolean = false;
+  loader: (id: string) => Promise<string> = (id: string) => Promise.resolve('');
+
+  aboutToAppear(): void {
+    if (this.localUri.length > 0) {
+      this.uri = this.localUri;
+      return;
+    }
+    if (this.attId.length === 0) {
+      this.failed = true;
+      return;
+    }
+    this.loader(this.attId).then((u: string) => {
+      this.uri = u;
+      this.failed = u.length === 0;
+    }).catch(() => {
+      this.failed = true;
+    });
+  }
+
+  build() {
+    Stack() {
+      if (this.uri.length > 0) {
+        Image(this.uri).objectFit(ImageFit.Cover).width('100%').height('100%')
+      } else if (this.failed) {
+        Text('图片打不开').fontSize(12).fontColor($r('app.color.sub'))
+      } else {
+        LoadingProgress().width(24).height(24)
+      }
+    }
+    .width(140)
+    .height(140)
+    .borderRadius(10)
+    .clip(true)
+    .backgroundColor('#14000000')
+  }
+}

@@ -453,6 +453,11 @@ private fun MessageRow(item: ChatItem, colorOf: (String) -> String? = { null }) 
                 "lookup" -> "${item.name ?: "助手"} 翻看了自己的聊天"
                 "resumed" -> "${item.name ?: "助手"} 的工作被电脑重启打断，正在继续"
                 "cut" -> "${item.name ?: "助手"} 的工作再次被重启打断，已停下"
+                "failed" -> "${item.name ?: "助手"} 这次没能回复，请稍后再试，或在电脑上查看原因"
+                "approval" -> "${item.name ?: "助手"} 在等你在电脑上确认"
+                "working" -> "${item.name ?: "助手"} 还在忙，做完会回到群里"
+                "missed" -> "${item.name ?: "助手"} 没赶上这一轮"
+                "quiet" -> "这一轮没有成员回复"
                 else -> null
             }
             if (label != null) Text(

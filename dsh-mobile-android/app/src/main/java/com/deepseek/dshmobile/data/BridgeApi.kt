@@ -146,11 +146,12 @@ class BridgeApi(
 
         private fun enc(v: String) = java.net.URLEncoder.encode(v, "UTF-8")
 
-        fun streamUrl(botId: String? = null, test: Boolean = false, roomId: String? = null): String {
+        fun streamUrl(botId: String? = null, test: Boolean = false, roomId: String? = null, since: Long? = null): String {
             val b = StringBuilder(baseUrl).append("/stream")
             val params = mutableListOf<String>()
             if (!roomId.isNullOrBlank()) params += "roomId=" + java.net.URLEncoder.encode(roomId, "UTF-8")
             else if (!botId.isNullOrBlank()) params += "botId=" + java.net.URLEncoder.encode(botId, "UTF-8")
+            if (!roomId.isNullOrBlank() && since != null && since >= 0) params += "since=$since"
             if (test) params += "mode=test"
             if (params.isNotEmpty()) b.append('?').append(params.joinToString("&"))
             return b.toString()

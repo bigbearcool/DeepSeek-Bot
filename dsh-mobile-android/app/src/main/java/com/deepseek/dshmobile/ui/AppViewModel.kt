@@ -28,6 +28,7 @@ import com.deepseek.dshmobile.data.StartRoute
 import com.deepseek.dshmobile.data.WaitEvent
 import com.deepseek.dshmobile.data.WaitMachine
 import com.deepseek.dshmobile.data.WaitPhase
+import com.deepseek.dshmobile.data.RoomRound
 import com.deepseek.dshmobile.data.WaitState
 import com.deepseek.dshmobile.data.parseChatItem
 import com.deepseek.dshmobile.dsh
@@ -324,7 +325,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     val token = auth.refreshAccess(force = forceRefresh)
                     forceRefresh = false
                     val url = BridgeApi(BridgeApi.restClient()).withBase(auth.effectiveBaseUrl())
-                        .streamUrl(botId = botId, test = false, roomId = roomId)
+                        .streamUrl(botId = botId, test = false, roomId = roomId,
+                            since = if (roomId != null) RoomRound.since(_state.value.messages) else null)
                     sse.connect(url, token).collect { ev ->
                         if (ev.event == "hello") {
                             gotHello = true
@@ -444,11 +446,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             "message" -> {
                 val item = parseChatItem(data.optJSONObject("item") ?: return)
                 _state.update { st ->
-                    val wait = if (item.kind == "member") WaitMachine.reduce(st.wait, WaitEvent.Dismiss) else st.wait
+                    val wait = if (RoomRound.endsWait(item)) WaitMachine.reduce(st.wait, WaitEvent.Dismiss) else st.wait
                     st.copy(
                         messages = ChatMerge.mergeIncoming(st.messages, item),
                         live = RoomStreams.prune(RoomStreams.onMessage(st.live, item), now),
                         wait = wait,
+                    )
+                }
+            }
+            "round" -> {
+                if (data.optString("phase") != "end") return
+                val replied = data.optInt("replied", 0)
+                val failed = data.optJSONArray("failed")?.length() ?: 0
+                _state.update { st ->
+                    st.copy(
+                        messages = if (st.wait.phase == WaitPhase.Waiting) RoomRound.onEnd(st.messages, replied, failed, now) else st.messages,
+                        live = RoomRound.dropUnshown(st.live),
+                        wait = if (st.wait.phase == WaitPhase.Waiting) WaitMachine.reduce(st.wait, WaitEvent.Dismiss) else st.wait,
                     )
                 }
             }

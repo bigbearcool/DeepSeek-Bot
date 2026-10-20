@@ -63,6 +63,29 @@ object RoomStreams {
         list.filter { it.endedAt == null || now - it.endedAt < KEEP_ENDED_MS }
 }
 
+/**
+ * A group chat round (bridge >= 0.0.10 sends `round` start/end from ds-bot's group relay).
+ * A member that fails, waits for an approval, keeps working or misses the round leaves no
+ * line in the group log, only an event of the round; those, a member line, or the round's
+ * end all end the waiting card, so it never stays up forever.
+ */
+object RoomRound {
+    private val ENDS_WAIT = setOf("failed", "approval", "working", "missed")
+
+    fun endsWait(item: ChatItem): Boolean =
+        item.kind == "member" || (item.kind == "event" && item.role in ENDS_WAIT)
+
+    /** Round over: no more waiting; nobody said anything and nobody failed → a quiet note. */
+    fun onEnd(messages: List<ChatItem>, replied: Int, failed: Int, now: Long): List<ChatItem> =
+        if (replied == 0 && failed == 0) messages + ChatItem(kind = "event", role = "quiet", time = now) else messages
+
+    /** Bubbles that never got shown text are dropped when the round ends. */
+    fun dropUnshown(live: List<LiveReply>): List<LiveReply> = live.filter { RoomStreams.shown(it) != null }
+
+    /** Highest group log seq the phone holds, sent as `since` when the stream (re)connects. */
+    fun since(messages: List<ChatItem>): Long? = messages.filter { !it.local }.mapNotNull { it.seq }.maxOrNull()
+}
+
 /** Client-side copy of ds-bot's name rules (shared/mentions.js nameProblem); ds-bot checks again. */
 object BotRules {
     private val ALL_WORDS = listOf("all", "everyone", "所有人", "全体")

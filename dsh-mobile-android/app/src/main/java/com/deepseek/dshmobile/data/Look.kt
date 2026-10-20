@@ -16,12 +16,12 @@ object Look {
 
     fun fallbackInk(key: String): String = FALLBACK_INKS[(hash(key) / 7) % FALLBACK_INKS.size]
 
-    /** 上午 8:41 / 下午 3:05 */
+    /** 上午8:41 / 下午3:05 (no space, like Grok Bot) */
     fun clock(at: Long): String {
         val c = Calendar.getInstance().apply { timeInMillis = at }
         val h = c.get(Calendar.HOUR_OF_DAY)
         val h12 = if (h % 12 == 0) 12 else h % 12
-        return "%s %d:%02d".format(if (h < 12) "上午" else "下午", h12, c.get(Calendar.MINUTE))
+        return "%s%d:%02d".format(if (h < 12) "上午" else "下午", h12, c.get(Calendar.MINUTE))
     }
 
     private val WEEK = arrayOf("星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六")
@@ -47,7 +47,7 @@ object Look {
         }
     }
 
-    /** Divider inside a chat: 今天 上午 8:00 */
+    /** Divider inside a chat: 今天 上午8:00 */
     fun dividerLabel(at: Long, now: Long = System.currentTimeMillis()): String = day(at, now) + " " + clock(at)
 
     const val DIVIDER_GAP_MS = 15 * 60_000L
@@ -80,13 +80,14 @@ object Look {
 
     /** Placeholder for the input box. */
     fun inputHint(name: String?, inRoom: Boolean): String = when {
-        inRoom -> "在群里说点什么"
-        name.isNullOrBlank() -> "问问助手"
-        else -> "问问 $name"
+        inRoom -> if (name.isNullOrBlank()) "在群里发消息" else "给 $name 发消息"
+        name.isNullOrBlank() -> "向助手提问"
+        else -> "向 $name 提问"
     }
 
     /** One plain line for the list: Markdown marks taken out, spaces collapsed. */
     fun plainPreview(text: String): String = text
+        .replace(Regex("!?\\[([^\\]]*)]\\([^)]*\\)?"), "$1")
         .replace(Regex("```[a-zA-Z0-9]*"), " ")
         .replace(Regex("\\|?(\\s*:?-{2,}:?\\s*\\|)+(\\s*:?-{2,}:?\\s*)?"), " ")
         .replace(Regex("#{1,6}\\s+"), "")
@@ -102,5 +103,59 @@ object Look {
         val q = query.trim()
         if (q.isEmpty()) return chats
         return chats.filter { it.name.contains(q, ignoreCase = true) || it.preview.contains(q, ignoreCase = true) }
+    }
+
+    // ---- quote reply ----
+    /** A short one-line piece of a message for the reply chip and the quote. */
+    fun snippet(text: String, max: Int = 40): String {
+        val p = plainPreview(text)
+        return if (p.length > max) p.take(max) + "…" else p
+    }
+
+    /** What is sent when replying to a message: a Markdown quote line, a blank line, then the reply. */
+    fun quoted(name: String?, snippet: String, reply: String): String {
+        val who = name?.takeIf { it.isNotBlank() }?.let { "$it：" }.orEmpty()
+        return "> $who$snippet\n\n$reply"
+    }
+
+    /** Splits a sent message back into (quote, rest) for the bubble; quote is null when there is none. */
+    fun splitQuote(text: String): Pair<String?, String> {
+        if (!text.startsWith("> ")) return null to text
+        val end = text.indexOf("\n\n")
+        if (end < 0) return null to text
+        return text.substring(2, end).trim() to text.substring(end + 2)
+    }
+
+    // ---- code blocks ----
+    data class Part(val code: Boolean, val text: String, val lang: String = "")
+
+    /** Splits Markdown into plain parts and fenced code blocks (an unfinished block while streaming counts as code). */
+    fun splitCode(md: String): List<Part> {
+        val out = mutableListOf<Part>()
+        val buf = StringBuilder()
+        var inCode = false
+        var lang = ""
+        val code = StringBuilder()
+        md.split("\n").forEach { line ->
+            val t = line.trimStart()
+            if (t.startsWith("```")) {
+                if (!inCode) {
+                    if (buf.isNotBlank()) out += Part(false, buf.toString().trim('\n'))
+                    buf.clear(); inCode = true; lang = t.removePrefix("```").trim()
+                } else {
+                    out += Part(true, code.toString().trimEnd('\n'), lang)
+                    code.clear(); inCode = false; lang = ""
+                }
+            } else if (inCode) code.append(line).append('\n') else buf.append(line).append('\n')
+        }
+        if (inCode) out += Part(true, code.toString().trimEnd('\n'), lang)
+        if (buf.isNotBlank()) out += Part(false, buf.toString().trim('\n'))
+        return out
+    }
+
+    /** 「X 正在工作」 for one Bot, 「X 正在输入…」 for group members. */
+    fun workingLabel(names: List<String>, inRoom: Boolean): String {
+        val who = names.filter { it.isNotBlank() }.distinct().joinToString("、").ifEmpty { "助手" }
+        return if (inRoom) "$who 正在输入…" else "$who 正在工作"
     }
 }

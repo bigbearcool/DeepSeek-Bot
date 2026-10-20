@@ -21,10 +21,10 @@ class LookTest {
     }
 
     @Test fun clockWords() {
-        assertEquals("上午 8:05", Look.clock(at(2026, 10, 20, 8, 5)))
-        assertEquals("下午 3:30", Look.clock(at(2026, 10, 20, 15, 30)))
-        assertEquals("上午 12:10", Look.clock(at(2026, 10, 20, 0, 10)))
-        assertEquals("下午 12:00", Look.clock(at(2026, 10, 20, 12, 0)))
+        assertEquals("上午8:05", Look.clock(at(2026, 10, 20, 8, 5)))
+        assertEquals("下午3:30", Look.clock(at(2026, 10, 20, 15, 30)))
+        assertEquals("上午12:10", Look.clock(at(2026, 10, 20, 0, 10)))
+        assertEquals("下午12:00", Look.clock(at(2026, 10, 20, 12, 0)))
     }
 
     @Test fun dayWords() {
@@ -41,8 +41,8 @@ class LookTest {
         val t0 = at(2026, 10, 20, 8, 0)
         val d = Look.dividers(listOf(null, t0, t0 + 60_000, t0 + 16 * 60_000, null, t0 + 20 * 60_000), now)
         assertEquals(setOf(1, 3), d.keys)
-        assertEquals("今天 上午 8:00", d[1])
-        assertEquals("今天 上午 8:16", d[3])
+        assertEquals("今天 上午8:00", d[1])
+        assertEquals("今天 上午8:16", d[3])
         assertTrue(Look.dividers(emptyList(), now).isEmpty())
     }
 
@@ -55,9 +55,9 @@ class LookTest {
     }
 
     @Test fun inputHints() {
-        assertEquals("问问 小助手", Look.inputHint("小助手", false))
-        assertEquals("问问助手", Look.inputHint(null, false))
-        assertEquals("在群里说点什么", Look.inputHint("群", true))
+        assertEquals("向 小助手 提问", Look.inputHint("小助手", false))
+        assertEquals("向助手提问", Look.inputHint(null, false))
+        assertEquals("给 周报群 发消息", Look.inputHint("周报群", true))
     }
 
     @Test fun searchByNameOrPreview() {
@@ -83,7 +83,7 @@ class LookTest {
     @Test fun listTimeWords() {
         val now = at(2026, 10, 20, 15, 30)
         assertEquals("刚刚", ChatListLogic.timeLabel(now - 10_000, now))
-        assertEquals("上午 9:05", ChatListLogic.timeLabel(at(2026, 10, 20, 9, 5), now))
+        assertEquals("上午9:05", ChatListLogic.timeLabel(at(2026, 10, 20, 9, 5), now))
         assertEquals("昨天", ChatListLogic.timeLabel(at(2026, 10, 19, 23, 0), now))
         assertEquals("星期六", ChatListLogic.timeLabel(at(2026, 10, 17, 12, 0), now))
         assertEquals("10月3日", ChatListLogic.timeLabel(at(2026, 10, 3, 12, 0), now))

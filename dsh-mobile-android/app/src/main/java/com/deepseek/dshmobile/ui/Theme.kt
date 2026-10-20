@@ -9,6 +9,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 
 /** Palette mirrors ds-bot desktop (--bt-* variables). */
 @Immutable
@@ -29,16 +30,23 @@ data class DsColors(
     val tagBg: Color,
     val input: Color,
     val secondary: Color,
+    /** Grouped cards (settings, sheets), quote chip. */
+    val group: Color,
+    /** Code blocks and table header. */
+    val code: Color,
+    /** Links only. */
+    val link: Color,
     val dark: Boolean,
 )
 
 val LightDs = DsColors(
-    bg = Color(0xFFFCFCFC), surface = Color(0xFFF8F8F8), card = Color(0xFFFFFFFF),
+    bg = Color(0xFFFAFAFA), surface = Color(0xFFF5F5F5), card = Color(0xFFFFFFFF),
     ink = Color(0xFF0B0B0B), ink2 = Color(0xFF6E6E73), ink3 = Color(0xFFA8A8AD),
-    line = Color(0x140B0B0B), bubble = Color(0xFFF1F2F1), user = Color(0xFF0B0B0B),
+    line = Color(0x140B0B0B), bubble = Color(0xFFF0F0F0), user = Color(0xFF0B0B0B),
     userInk = Color(0xFFFFFFFF), accent = Color(0xFF4D6BFE), danger = Color(0xFFE02135),
     green = Color(0xFF00C972), tagBg = Color(0x0F0B0B0B), input = Color(0xFFFFFFFF),
-    secondary = Color(0xFFE6E7E6), dark = false,
+    secondary = Color(0xFFE6E7E6), group = Color(0xFFF0F0F0), code = Color(0xFFE4E4E4),
+    link = Color(0xFF1A73E8), dark = false,
 )
 
 val DarkDs = DsColors(
@@ -47,7 +55,8 @@ val DarkDs = DsColors(
     line = Color(0x1AFFFFFF), bubble = Color(0xFF222222), user = Color(0xFFF2F2F2),
     userInk = Color(0xFF0B0B0B), accent = Color(0xFF6B85FF), danger = Color(0xFFFF5566),
     green = Color(0xFF00C972), tagBg = Color(0x17FFFFFF), input = Color(0xFF1C1C1C),
-    secondary = Color(0xFF2C2C2C), dark = true,
+    secondary = Color(0xFF2C2C2C), group = Color(0xFF1C1C1C), code = Color(0xFF2E2E2E),
+    link = Color(0xFF6AA8FF), dark = true,
 )
 
 val LocalDs = staticCompositionLocalOf { LightDs }
@@ -58,14 +67,19 @@ fun DsTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Un
     val scheme = if (dark) darkColorScheme(
         primary = c.ink, onPrimary = c.bg, background = c.bg, onBackground = c.ink,
         surface = c.bg, onSurface = c.ink, surfaceVariant = c.bubble, onSurfaceVariant = c.ink2,
-        outline = c.line, error = c.danger, secondary = c.accent,
+        outline = c.line, error = c.danger, secondary = c.accent, surfaceContainer = c.card,
     ) else lightColorScheme(
         primary = c.ink, onPrimary = c.bg, background = c.bg, onBackground = c.ink,
         surface = c.bg, onSurface = c.ink, surfaceVariant = c.bubble, onSurfaceVariant = c.ink2,
-        outline = c.line, error = c.danger, secondary = c.accent,
+        outline = c.line, error = c.danger, secondary = c.accent, surfaceContainer = c.card,
     )
     CompositionLocalProvider(LocalDs provides c) {
-        MaterialTheme(colorScheme = scheme, content = content)
+        MaterialTheme(
+            colorScheme = scheme,
+            // Popovers and menus: white rounded cards.
+            shapes = androidx.compose.material3.Shapes(extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(14.dp)),
+            content = content,
+        )
     }
 }
 

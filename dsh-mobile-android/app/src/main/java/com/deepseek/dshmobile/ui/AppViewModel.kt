@@ -48,9 +48,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.UUID
 
-enum class Screen { Loading, Pair, Team, Chat, NewBot, NewRoom }
+enum class Screen { Loading, Pair, Team, Chat, NewBot, NewRoom, Settings }
 
 const val ROOM_KEY_PREFIX = "room:"
+const val NO_NETWORK = "网络不通，请检查网络后重试"
 
 data class UiState(
     val screen: Screen = Screen.Loading,
@@ -93,6 +94,10 @@ data class UiState(
     /** Approvals being answered right now (buttons locked). */
     val answering: Set<String> = emptySet(),
     val stopping: Boolean = false,
+    // ---- kept on this phone only ----
+    val prefs: com.deepseek.dshmobile.data.ChatPrefs = com.deepseek.dshmobile.data.ChatPrefs(),
+    /** The message being answered (quoted when sent). */
+    val replyTo: ReplyTarget? = null,
 ) {
     val openKind: String? get() = when { selectedRoom != null -> "room"; selectedBot != null -> "bot"; else -> null }
     val openId: String? get() = selectedRoom?.id ?: selectedBot?.id
@@ -112,10 +117,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
+    private val prefsStore = com.deepseek.dshmobile.data.ChatPrefsStore(app)
     private var streamJob: Job? = null
     private var pollJob: Job? = null
 
     init {
+        viewModelScope.launch { prefsStore.flow.collect { p -> _state.update { it.copy(prefs = p) } } }
         viewModelScope.launch {
             val snap = store.snapshot.first()
             _state.update { it.copy(baseUrl = snap.baseUrl.ifBlank { BuildConfig.DEFAULT_BASE_URL }, paired = snap.isPaired) }
@@ -149,6 +156,41 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun showNotice(text: String) = _state.update { it.copy(notice = text) }
     fun clearNotice() = _state.update { it.copy(notice = null) }
 
+    // ---- phone-only list settings, look, settings page ----
+    private fun editPrefs(change: (com.deepseek.dshmobile.data.ChatPrefs) -> com.deepseek.dshmobile.data.ChatPrefs) {
+        val next = change(_state.value.prefs)
+        _state.update { it.copy(prefs = next) }
+        viewModelScope.launch { prefsStore.save(next) }
+    }
+    fun togglePin(c: ChatEntry) = editPrefs { com.deepseek.dshmobile.data.ChatPrefsLogic.togglePin(it, c) }
+    fun hideChat(c: ChatEntry) = editPrefs { com.deepseek.dshmobile.data.ChatPrefsLogic.hide(it, c, System.currentTimeMillis()) }
+    fun unhideAll() = editPrefs { com.deepseek.dshmobile.data.ChatPrefsLogic.unhideAll(it) }
+    fun setTheme(t: String) = editPrefs { it.copy(theme = com.deepseek.dshmobile.data.ChatPrefsLogic.normTheme(t)) }
+    /** 标为未读 is kept on the phone; 标为已读 on a chat with real unread messages tells the computer too. */
+    fun toggleUnread(c: ChatEntry) {
+        val marked = com.deepseek.dshmobile.data.ChatPrefsLogic.markedUnread(c, _state.value.prefs)
+        if (c.unread > 0 || marked) {
+            if (marked) editPrefs { com.deepseek.dshmobile.data.ChatPrefsLogic.toggleUnread(it, c) }
+            if (c.unread > 0) {
+                _state.update { s -> s.copy(chats = s.chats.map { if (it.kind == c.kind && it.id == c.id) it.copy(unread = 0) else it }) }
+                viewModelScope.launch { runCatching { auth.withAccess { token, api -> api.markRead(token, c.kind, c.id) } } }
+            }
+        } else editPrefs { com.deepseek.dshmobile.data.ChatPrefsLogic.toggleUnread(it, c) }
+    }
+    fun openSettings() = _state.update { it.copy(screen = Screen.Settings) }
+    fun closeSettings() = _state.update { it.copy(screen = Screen.Team) }
+    fun setReply(r: ReplyTarget?) = _state.update { it.copy(replyTo = r) }
+    fun attachLater(kind: String) = _state.update { it.copy(notice = "发送文件和图片下一版就能用") }
+
+    /** Sends the typed text; when answering a message, the quote goes first. */
+    fun sendWithReply() {
+        val r = _state.value.replyTo
+        if (r != null && _state.value.composeText.isNotBlank() && !_state.value.sending) {
+            _state.update { it.copy(composeText = com.deepseek.dshmobile.data.Look.quoted(r.name, r.snippet, it.composeText.trim()), replyTo = null) }
+        }
+        sendMessage()
+    }
+
     private fun friendly(e: Throwable): String = when (e) {
         is AuthRevokedError -> "此设备的配对已失效，请在电脑上重新获取配对码"
         is BridgeError -> if (e.zh != null) e.zh else when (e.status) {
@@ -160,7 +202,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             else -> "请求失败（${e.status}），请稍后再试"
         }
         is java.net.UnknownHostException, is java.net.ConnectException,
-        is java.net.SocketTimeoutException, is java.io.IOException -> "网络不通，请检查网络后重试"
+        is java.net.SocketTimeoutException, is java.io.IOException -> NO_NETWORK
         else -> e.message ?: "出错了，请稍后再试"
     }
 
@@ -215,7 +257,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun logout() = viewModelScope.launch {
         stopStream()
         auth.logout()
-        _state.update { UiState(screen = Screen.Pair, baseUrl = it.baseUrl) }
+        _state.update { UiState(screen = Screen.Pair, baseUrl = it.baseUrl, prefs = it.prefs) }
     }
 
     // ---- team ----
@@ -251,6 +293,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update {
                     it.copy(
                         chats = ChatListLogic.clearOpen(ChatListLogic.sorted(list.chats), it.openKind, it.openId),
+                        // The list came back, so an old "no network" note is stale.
+                        notice = if (it.notice == NO_NETWORK) null else it.notice,
                         approvals = list.approvals,
                         answering = it.answering.intersect(list.approvals.map { a -> a.id }.toSet()),
                     )
@@ -326,6 +370,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** From the list: open whichever chat a row is. */
     fun openChat(entry: ChatEntry) {
+        if (com.deepseek.dshmobile.data.ChatPrefsLogic.markedUnread(entry, _state.value.prefs)) {
+            editPrefs { com.deepseek.dshmobile.data.ChatPrefsLogic.opened(it, entry.kind, entry.id) }
+        }
         if (entry.isRoom) {
             val room = _state.value.rooms.find { it.id == entry.id } ?: RoomInfo(entry.id, entry.name, members = entry.members)
             openRoom(room)
@@ -361,7 +408,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { markOpenRead(); refreshChats() }
         viewModelScope.launch { store.setLastBotId(null) }
         _state.update {
-            it.copy(screen = Screen.Team, selectedBot = null, selectedRoom = null, live = emptyList(), messages = emptyList(), wait = WaitState(), formError = null)
+            it.copy(screen = Screen.Team, selectedBot = null, selectedRoom = null, live = emptyList(), messages = emptyList(), wait = WaitState(), formError = null, replyTo = null)
         }
         if (!_state.value.teamLoaded) loadTeam()
     }

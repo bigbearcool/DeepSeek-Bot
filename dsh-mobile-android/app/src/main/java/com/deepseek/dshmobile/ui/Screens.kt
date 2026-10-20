@@ -7,7 +7,39 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.material.icons.automirrored.outlined.Reply
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.TextFields
+import androidx.compose.material.icons.outlined.MarkChatUnread
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import com.deepseek.dshmobile.data.ChatPrefsLogic
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -93,7 +125,8 @@ import com.deepseek.dshmobile.data.WaitState
 internal fun RoundButton(icon: ImageVector, desc: String, enabled: Boolean = true, onClick: () -> Unit) {
     val c = LocalDs.current
     Box(
-        Modifier.size(36.dp).clip(CircleShape).background(c.surface).border(1.dp, c.line, CircleShape)
+        Modifier.size(36.dp).shadow(if (c.dark) 0.dp else 2.dp, CircleShape, clip = false).clip(CircleShape).background(c.card)
+            .then(if (c.dark) Modifier.border(1.dp, c.line, CircleShape) else Modifier)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, desc, tint = if (enabled) c.ink else c.ink3, modifier = Modifier.size(20.dp)) }
@@ -305,9 +338,12 @@ fun TeamScreen(
     onNewRoom: () -> Unit = {},
     onOpenChat: (ChatEntry) -> Unit = {},
     onAnswer: (String, Boolean) -> Unit = { _, _ -> },
+    onSettings: () -> Unit = {},
+    onTogglePin: (ChatEntry) -> Unit = {},
+    onToggleUnread: (ChatEntry) -> Unit = {},
+    onHide: (ChatEntry) -> Unit = {},
 ) {
     val c = LocalDs.current
-    var menu by remember { mutableStateOf(false) }
     var add by remember { mutableStateOf(false) }
     var searching by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -316,13 +352,7 @@ fun TeamScreen(
             Modifier.fillMaxWidth().statusBarsPadding().height(56.dp).padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box {
-                RoundButton(Icons.Filled.Person, "我", onClick = { menu = true })
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text("刷新") }, onClick = { menu = false; onRefresh() })
-                    DropdownMenuItem(text = { Text("断开这台电脑", color = c.danger) }, onClick = { menu = false; onLogout() })
-                }
-            }
+            RoundButton(Icons.Filled.Person, "设置", onClick = onSettings)
             Spacer(Modifier.weight(1f))
             RoundButton(if (searching) Icons.Filled.Close else Icons.Filled.Search, if (searching) "关闭搜索" else "搜索") {
                 searching = !searching; if (!searching) query = ""
@@ -331,9 +361,9 @@ fun TeamScreen(
             Box {
                 RoundButton(Icons.Filled.Add, "新建", onClick = { add = true })
                 DropdownMenu(expanded = add, onDismissRequest = { add = false }) {
-                    DropdownMenuItem(text = { Text("新建助手") }, onClick = { add = false; onNewBot() })
+                    DropdownMenuItem(text = { Text("新建助手", fontSize = 16.sp) }, onClick = { add = false; onNewBot() })
                     DropdownMenuItem(
-                        text = { Text("新建群聊", color = if (state.bots.size >= 2) Color.Unspecified else c.ink3) },
+                        text = { Text("新建群聊", fontSize = 16.sp, color = if (state.bots.size >= 2) Color.Unspecified else c.ink3) },
                         enabled = state.bots.size >= 2,
                         onClick = { add = false; onNewRoom() },
                     )
@@ -359,7 +389,7 @@ fun TeamScreen(
             return@Column
         }
         val chats = if (state.chats.isNotEmpty()) state.chats else fallbackChats(state)
-        val shown = Look.filter(chats, query)
+        val shown = Look.filter(ChatPrefsLogic.apply(chats, state.prefs), query)
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
             if (state.approvals.isNotEmpty() && query.isBlank()) {
                 item(key = "h-approvals") { SectionLabel("等你确认") }
@@ -374,7 +404,7 @@ fun TeamScreen(
                     modifier = Modifier.fillMaxWidth().padding(top = 48.dp))
             }
             items(shown, key = { it.kind + "-" + it.id }) { chat ->
-                ChatRow(chat, state, onClick = {
+                ChatRow(chat, state, onTogglePin = onTogglePin, onToggleUnread = onToggleUnread, onHide = onHide, onClick = {
                     if (state.chats.isNotEmpty()) onOpenChat(chat)
                     else if (chat.isRoom) state.rooms.find { it.id == chat.id }?.let(onOpenRoom)
                     else state.bots.find { it.id == chat.id }?.let(onOpen)
@@ -398,50 +428,84 @@ private fun ChatAvatar(chat: ChatEntry, state: UiState, size: Int) {
     } else Avatar(chat.name, size, chat.color ?: state.bots.find { it.id == chat.id }?.color, key = chat.id)
 }
 
-/** One conversation: shape avatar, name, time, one line of the last message, unread count. */
+/** One conversation: shape avatar, name, time, one line of the last message, unread count. Long-press: 标为未读 / 置顶 / 隐藏. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChatRow(chat: ChatEntry, state: UiState, onClick: () -> Unit) {
+private fun ChatRow(
+    chat: ChatEntry, state: UiState, onClick: () -> Unit,
+    onTogglePin: (ChatEntry) -> Unit = {}, onToggleUnread: (ChatEntry) -> Unit = {}, onHide: (ChatEntry) -> Unit = {},
+) {
     val c = LocalDs.current
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        ChatAvatar(chat, state, 44)
-        Spacer(Modifier.size(14.dp))
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    chat.name, color = c.ink, fontSize = 17.sp, lineHeight = 22.sp,
-                    fontWeight = if (chat.unread > 0) FontWeight.Bold else FontWeight.SemiBold,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
-                )
-                Spacer(Modifier.size(8.dp))
-                Text(ChatListLogic.timeLabel(chat.lastAt), color = c.ink2, fontSize = 15.sp, maxLines = 1)
-            }
-            Spacer(Modifier.height(2.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val waiting = state.approvals.any { a -> if (chat.isRoom) a.roomId == chat.id else a.roomId == null && a.botId == chat.id }
-                val line = when {
-                    waiting -> "等你确认"
-                    chat.running -> "正在回复…"
-                    chat.preview.isNotBlank() -> Look.plainPreview(chat.preview)
-                    chat.isRoom -> state.rooms.find { it.id == chat.id }?.memberNames?.joinToString("、").orEmpty()
-                    else -> state.bots.find { it.id == chat.id }?.role.orEmpty()
-                }
-                Text(
-                    line, color = if (waiting) c.danger else c.ink2,
-                    fontSize = 15.sp, lineHeight = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
-                )
-                ChatListLogic.badge(chat.unread)?.let { b ->
+    var menu by remember { mutableStateOf(false) }
+    val pinned = ChatPrefsLogic.isPinned(chat, state.prefs)
+    val handUnread = ChatPrefsLogic.markedUnread(chat, state.prefs)
+    val unread = chat.unread > 0 || handUnread
+    Box {
+        Row(
+            Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = { menu = true })
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ChatAvatar(chat, state, 44)
+            Spacer(Modifier.size(14.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        chat.name, color = c.ink, fontSize = 16.sp, lineHeight = 21.sp,
+                        fontWeight = if (unread) FontWeight.Bold else FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                    )
                     Spacer(Modifier.size(8.dp))
-                    Box(
-                        Modifier.height(20.dp).widthIn(min = 20.dp).clip(RoundedCornerShape(10.dp)).background(c.ink).padding(horizontal = 6.dp),
-                        contentAlignment = Alignment.Center,
-                    ) { Text(b, color = c.bg, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                    if (pinned) {
+                        Icon(Icons.Filled.PushPin, "已置顶", tint = c.ink3, modifier = Modifier.size(13.dp))
+                        Spacer(Modifier.size(4.dp))
+                    }
+                    Text(ChatListLogic.timeLabel(chat.lastAt), color = c.ink3, fontSize = 12.sp, maxLines = 1)
+                }
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val waiting = state.approvals.any { a -> if (chat.isRoom) a.roomId == chat.id else a.roomId == null && a.botId == chat.id }
+                    val line = when {
+                        waiting -> "等你确认"
+                        chat.running -> if (chat.isRoom) "正在输入…" else "正在工作"
+                        chat.preview.isNotBlank() -> Look.plainPreview(chat.preview)
+                        chat.isRoom -> state.rooms.find { it.id == chat.id }?.memberNames?.joinToString("、").orEmpty()
+                        else -> state.bots.find { it.id == chat.id }?.role.orEmpty()
+                    }
+                    Text(
+                        line, color = if (waiting) c.danger else c.ink2,
+                        fontSize = 14.sp, lineHeight = 19.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                    )
+                    val badge = ChatListLogic.badge(chat.unread)
+                    if (badge != null) {
+                        Spacer(Modifier.size(8.dp))
+                        Box(
+                            Modifier.height(20.dp).widthIn(min = 20.dp).clip(RoundedCornerShape(10.dp)).background(c.ink).padding(horizontal = 6.dp),
+                            contentAlignment = Alignment.Center,
+                        ) { Text(badge, color = c.bg, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                    } else if (handUnread) {
+                        Spacer(Modifier.size(8.dp))
+                        Box(Modifier.size(10.dp).clip(CircleShape).background(c.ink))
+                    }
                 }
             }
         }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, offset = androidx.compose.ui.unit.DpOffset(120.dp, 0.dp)) {
+            MenuRow(Icons.Outlined.MarkChatUnread, if (unread) "标为已读" else "标为未读") { menu = false; onToggleUnread(chat) }
+            MenuRow(Icons.Outlined.PushPin, if (pinned) "取消置顶" else "置顶") { menu = false; onTogglePin(chat) }
+            MenuRow(Icons.Outlined.VisibilityOff, "隐藏", danger = true) { menu = false; onHide(chat) }
+        }
     }
+}
+
+@Composable
+internal fun MenuRow(icon: ImageVector, text: String, danger: Boolean = false, onClick: () -> Unit) {
+    val c = LocalDs.current
+    DropdownMenuItem(
+        leadingIcon = { Icon(icon, null, tint = if (danger) c.danger else c.ink2, modifier = Modifier.size(20.dp)) },
+        text = { Text(text, color = if (danger) c.danger else c.ink, fontSize = 16.sp) },
+        onClick = onClick,
+    )
 }
 
 /** A request from a Bot that needs the user's yes or no. */
@@ -498,6 +562,10 @@ internal fun SectionLabel(text: String) {
 
 // ---------- chat ----------
 
+/** The message the user is answering (shown above the input box, quoted when sent). */
+data class ReplyTarget(val name: String?, val snippet: String)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
     state: UiState,
@@ -510,6 +578,8 @@ fun ChatScreen(
     onAnswer: (String, Boolean) -> Unit = { _, _ -> },
     onVoice: () -> Unit = {},
     onRefresh: () -> Unit = {},
+    onReply: (ReplyTarget?) -> Unit = {},
+    onAttach: (String) -> Unit = {},
 ) {
     val c = LocalDs.current
     val list = rememberLazyListState()
@@ -522,6 +592,14 @@ fun ChatScreen(
     val dividers = remember(state.messages) { Look.dividers(state.messages.map { it.time }) }
     val colorOf = { id: String? -> id?.let { i -> state.bots.find { it.id == i }?.color } }
     var menu by remember { mutableStateOf(false) }
+    var sheetFor by remember { mutableStateOf<ChatItem?>(null) }
+    var selectText by remember { mutableStateOf<String?>(null) }
+    val clip = LocalClipboardManager.current
+    val ctx = LocalContext.current
+    val replyOf = { m: ChatItem ->
+        val who = when (m.kind) { "user", "answer" -> "你"; "member" -> m.name ?: "助手"; else -> state.selectedBot?.name }
+        onReply(ReplyTarget(who, Look.snippet(Look.splitQuote(m.text.orEmpty()).second)))
+    }
     Column(Modifier.fillMaxSize().background(c.bg).imePadding()) {
         Row(
             Modifier.fillMaxWidth().statusBarsPadding().height(56.dp).padding(horizontal = 16.dp),
@@ -530,29 +608,23 @@ fun ChatScreen(
             RoundButton(Icons.AutoMirrored.Filled.ArrowBack, "返回", onClick = onBack)
             Spacer(Modifier.size(8.dp))
             Row(
-                Modifier.weight(1f, fill = false).height(36.dp).clip(RoundedCornerShape(18.dp)).background(c.surface)
-                    .border(1.dp, c.line, RoundedCornerShape(18.dp)).padding(start = 6.dp, end = 14.dp),
+                Modifier.weight(1f, fill = false).height(36.dp).shadow(if (c.dark) 0.dp else 2.dp, RoundedCornerShape(18.dp), clip = false)
+                    .clip(RoundedCornerShape(18.dp)).background(c.card).padding(start = 6.dp, end = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val room = state.selectedRoom
                 if (room != null) RoomShapeAvatar(room.members.map { id -> id to colorOf(id) }.ifEmpty { listOf(room.id to null) }, 24)
                 else state.selectedBot?.let { Avatar(it.name, 24, it.color, key = it.id) }
                 Spacer(Modifier.size(8.dp))
-                Text(state.chatTitle, color = c.ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(state.chatTitle, color = c.ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.weight(1f))
             Box {
                 RoundButton(Icons.Filled.MoreHoriz, "更多", onClick = { menu = true })
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text("刷新") }, onClick = { menu = false; onRefresh() })
+                    DropdownMenuItem(text = { Text("刷新", fontSize = 16.sp) }, onClick = { menu = false; onRefresh() })
                 }
             }
-        }
-        state.selectedRoom?.takeIf { it.memberNames.isNotEmpty() }?.let {
-            Text(
-                it.memberNames.joinToString("、"), color = c.ink3, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-            )
         }
         if (state.reconnecting) Banner("正在重新连接…")
         state.notice?.let { Banner(it, danger = true) }
@@ -579,28 +651,150 @@ fun ChatScreen(
                 Column {
                     dividers[i]?.let { TimeDivider(it) }
                     val prev = state.messages.getOrNull(i - 1)
-                    val showName = m.kind == "member" && (prev?.kind != "member" || prev.botId != m.botId || dividers[i] != null)
-                    MessageRow(m, colorOf, showName)
+                    val next = state.messages.getOrNull(i + 1)
+                    val firstOfRun = m.kind == "member" && (prev?.kind != "member" || prev.botId != m.botId || dividers[i] != null)
+                    val lastOfRun = m.kind == "member" && (next?.kind != "member" || next.botId != m.botId || dividers[i + 1] != null)
+                    SwipeToReply(enabled = m.kind in setOf("member", "bot", "user", "answer"), onReply = { replyOf(m) }) {
+                        MessageRow(m, colorOf, firstOfRun, lastOfRun, onLongPress = { sheetFor = m })
+                    }
                 }
             }
             items(liveShown, key = { "live-" + it.first.attemptId }) { (reply, text) ->
-                MemberBubble(reply.name ?: "助手", reply.botId, text, colorOf(reply.botId), showName = true, live = reply.endedAt == null)
+                MemberBubble(reply.name ?: "助手", reply.botId, text, colorOf(reply.botId), showName = true, showAvatar = true)
             }
-            val typing = state.live.filter { it.endedAt == null && RoomStreams.shown(it) == null }.mapNotNull { it.name }.distinct()
+            val typing = state.live.filter { it.endedAt == null && RoomStreams.shown(it) == null }
             if (typing.isNotEmpty() && liveShown.isEmpty()) item(key = "typing") {
-                ThinkingBubble("${typing.joinToString("、")} 正在回复")
+                WorkingLine(typing.mapNotNull { it.name }, typing.firstOrNull()?.botId, colorOf(typing.firstOrNull()?.botId), inRoom = true)
             }
-            if (state.wait.visible && !(state.inRoom && state.wait.phase == WaitPhase.Streaming)) item(key = "wait") { WaitCard(state.wait, onDismissWait) }
+            if (state.wait.visible && !(state.inRoom && state.wait.phase == WaitPhase.Streaming)) item(key = "wait") {
+                WaitCard(state.wait, onDismissWait, state.selectedBot, inRoom = state.inRoom, hideWorking = typing.isNotEmpty())
+            }
             items(state.openApprovals, key = { "ap-" + it.id }) { a ->
                 ApprovalCard(a, busy = a.id in state.answering, showWhere = state.inRoom, onAnswer = onAnswer,
                     modifier = Modifier.padding(top = 8.dp).widthIn(max = 340.dp))
             }
         }
+        state.replyTo?.let { r -> ReplyChip(r, onClose = { onReply(null) }) }
         Composer(
             state.composeText, state.sending, onComposeChange, onSend,
-            hint = Look.inputHint(state.selectedBot?.name, state.inRoom),
-            showStop = state.showStop, stopping = state.stopping, onStop = onStop, onVoice = onVoice,
+            hint = Look.inputHint(if (state.inRoom) state.chatTitle else state.selectedBot?.name, state.inRoom),
+            showStop = state.showStop, stopping = state.stopping, onStop = onStop, onVoice = onVoice, onAttach = onAttach,
         )
+    }
+    sheetFor?.let { m ->
+        val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val scope = rememberCoroutineScope()
+        val close = { after: () -> Unit -> scope.launch { sheet.hide() }.invokeOnCompletion { sheetFor = null; after() }; Unit }
+        val body = Look.splitQuote(m.text.orEmpty()).second
+        ModalBottomSheet(onDismissRequest = { sheetFor = null }, sheetState = sheet, containerColor = c.bg) {
+            Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SheetCard {
+                    SheetRow(Icons.AutoMirrored.Outlined.Reply, "回复") { close { replyOf(m) } }
+                }
+                SheetCard {
+                    SheetRow(Icons.Outlined.ContentCopy, "复制") {
+                        clip.setText(AnnotatedString(body))
+                        android.widget.Toast.makeText(ctx, "已复制", android.widget.Toast.LENGTH_SHORT).show()
+                        close {}
+                    }
+                    SheetDivider()
+                    SheetRow(Icons.Outlined.TextFields, "选择文本") { close { selectText = body } }
+                }
+            }
+        }
+    }
+    selectText?.let { t ->
+        AlertDialog(
+            onDismissRequest = { selectText = null },
+            confirmButton = { TextButton(onClick = { selectText = null }) { Text("完成", color = c.ink) } },
+            containerColor = c.bg,
+            text = {
+                SelectionContainer(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(t, color = c.ink, fontSize = 16.sp, lineHeight = 22.sp)
+                }
+            },
+        )
+    }
+}
+
+/** Grouped rounded card, like the sheets and settings in Grok Bot. */
+@Composable
+internal fun SheetCard(content: @Composable () -> Unit) {
+    val c = LocalDs.current
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.group)) { content() }
+}
+
+@Composable
+internal fun SheetRow(icon: ImageVector?, text: String, danger: Boolean = false, trailing: (@Composable () -> Unit)? = null, onClick: (() -> Unit)?) {
+    val c = LocalDs.current
+    Row(
+        Modifier.fillMaxWidth().heightIn52().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) {
+            Icon(icon, null, tint = if (danger) c.danger else c.ink, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.size(12.dp))
+        }
+        Text(text, color = if (danger) c.danger else c.ink, fontSize = 16.sp, modifier = Modifier.weight(1f))
+        trailing?.invoke()
+    }
+}
+
+private fun Modifier.heightIn52(): Modifier = this.then(Modifier.height(52.dp))
+
+@Composable
+internal fun SheetDivider() {
+    val c = LocalDs.current
+    Box(Modifier.fillMaxWidth().padding(start = 48.dp).height(1.dp).background(c.line))
+}
+
+/** Swipe a message to the right to answer it. */
+@Composable
+private fun SwipeToReply(enabled: Boolean, onReply: () -> Unit, content: @Composable () -> Unit) {
+    if (!enabled) { content(); return }
+    val c = LocalDs.current
+    val offset = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val limit = with(LocalDensity.current) { 72.dp.toPx() }
+    Box(
+        Modifier.fillMaxWidth().pointerInput(Unit) {
+            detectHorizontalDragGestures(
+                onDragEnd = {
+                    val hit = offset.value >= limit * 0.8f
+                    scope.launch { offset.animateTo(0f, tween(180)) }
+                    if (hit) onReply()
+                },
+                onDragCancel = { scope.launch { offset.animateTo(0f, tween(180)) } },
+                onHorizontalDrag = { change, dx ->
+                    change.consume()
+                    scope.launch { offset.snapTo((offset.value + dx).coerceIn(0f, limit)) }
+                },
+            )
+        },
+    ) {
+        if (offset.value > 8f) Icon(
+            Icons.AutoMirrored.Outlined.Reply, null, tint = c.ink3.copy(alpha = (offset.value / limit).coerceIn(0f, 1f)),
+            modifier = Modifier.align(Alignment.CenterStart).padding(start = 4.dp).size(20.dp),
+        )
+        Box(Modifier.graphicsLayer { translationX = offset.value }) { content() }
+    }
+}
+
+@Composable
+private fun ReplyChip(r: ReplyTarget, onClose: () -> Unit) {
+    val c = LocalDs.current
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 6.dp).clip(RoundedCornerShape(14.dp)).background(c.group)
+            .padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("回复 ${r.name ?: ""}".trim(), color = c.ink3, fontSize = 12.sp)
+            Text(r.snippet, color = c.ink, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Box(Modifier.size(36.dp).clip(CircleShape).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+            Icon(Icons.Filled.Close, "不回复了", tint = c.ink3, modifier = Modifier.size(18.dp))
+        }
     }
 }
 
@@ -612,35 +806,50 @@ private fun TimeDivider(label: String) {
 }
 
 /** Gray bubble for a Bot's words (Markdown inside). */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BotBubble(text: String, modifier: Modifier = Modifier) {
+private fun BotBubble(text: String, modifier: Modifier = Modifier, maxFraction: Float = 0.85f, onLongPress: (() -> Unit)? = null) {
     val c = LocalDs.current
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         Box(
-            modifier.widthIn(max = maxWidth * 0.85f).clip(RoundedCornerShape(18.dp)).background(c.bubble)
+            modifier.widthIn(max = maxWidth * maxFraction).clip(RoundedCornerShape(18.dp)).background(c.bubble)
+                .then(if (onLongPress != null) Modifier.combinedClickable(onClick = {}, onLongClick = onLongPress) else Modifier)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
         ) { MarkdownText(text) }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageRow(item: ChatItem, colorOf: (String?) -> String?, showName: Boolean) {
+private fun MessageRow(item: ChatItem, colorOf: (String?) -> String?, firstOfRun: Boolean, lastOfRun: Boolean, onLongPress: () -> Unit) {
     val c = LocalDs.current
     when (item.kind) {
         "member" -> MemberBubble(
             item.name ?: "助手", item.botId,
             item.text.orEmpty() + if (item.cut) "\n\n（内容较长，完整内容请在电脑上查看）" else "",
-            colorOf(item.botId), showName = showName,
+            colorOf(item.botId), showName = firstOfRun, showAvatar = lastOfRun, onLongPress = onLongPress,
         )
         "user", "answer" -> BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.CenterEnd) {
-            Text(
-                item.text.orEmpty() + (if ((item.images ?: 0) > 0) "  [图片×${item.images}]" else ""),
-                color = c.userInk, fontSize = 16.sp, lineHeight = 22.sp,
-                modifier = Modifier.widthIn(max = maxWidth * 0.8f).clip(RoundedCornerShape(18.dp))
-                    .background(c.user).padding(horizontal = 14.dp, vertical = 10.dp),
-            )
+            val (quote, body) = Look.splitQuote(item.text.orEmpty())
+            Column(
+                Modifier.widthIn(max = maxWidth * 0.8f).clip(RoundedCornerShape(18.dp)).background(c.user)
+                    .combinedClickable(onClick = {}, onLongClick = onLongPress)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+            ) {
+                if (quote != null) {
+                    Row(Modifier.padding(bottom = 6.dp)) {
+                        Box(Modifier.width3().height(18.dp).background(c.userInk.copy(alpha = 0.4f)))
+                        Spacer(Modifier.size(8.dp))
+                        Text(quote, color = c.userInk.copy(alpha = 0.7f), fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                Text(
+                    body + (if ((item.images ?: 0) > 0) "  [图片×${item.images}]" else ""),
+                    color = c.userInk, fontSize = 16.sp, lineHeight = 22.sp,
+                )
+            }
         }
-        "bot" -> BotBubble(item.text.orEmpty())
+        "bot" -> BotBubble(item.text.orEmpty(), onLongPress = onLongPress)
         else -> {
             val label = when (item.role) {
                 "request" -> "${item.name ?: "其他助手"} 发来请求"
@@ -666,23 +875,24 @@ private fun MessageRow(item: ChatItem, colorOf: (String?) -> String?, showName: 
     }
 }
 
-/** A member's message in a group chat: small shape and name above a gray bubble (once per run of messages). */
+private fun Modifier.width3(): Modifier = this.then(Modifier.size(width = 3.dp, height = 18.dp))
+
+/** A member's message in a group chat: name above the first bubble of a run, small avatar at the bottom-left of the last. */
 @Composable
-private fun MemberBubble(name: String, botId: String?, text: String, color: String?, showName: Boolean, live: Boolean = false) {
+private fun MemberBubble(
+    name: String, botId: String?, text: String, color: String?, showName: Boolean, showAvatar: Boolean,
+    onLongPress: (() -> Unit)? = null,
+) {
     val c = LocalDs.current
     Column(Modifier.fillMaxWidth().padding(top = if (showName) 8.dp else 0.dp)) {
-        if (showName) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)) {
-                Avatar(name, 18, color, key = botId ?: name)
-                Spacer(Modifier.size(6.dp))
-                Text(name, color = c.ink2, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                if (live) {
-                    Spacer(Modifier.size(6.dp))
-                    BreathingDots()
-                }
+        if (showName) Text(name, color = c.ink3, fontSize = 13.sp, modifier = Modifier.padding(start = 34.dp, bottom = 4.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            Box(Modifier.size(24.dp), contentAlignment = Alignment.BottomStart) {
+                if (showAvatar) Avatar(name, 20, color, key = botId ?: name)
             }
+            Spacer(Modifier.size(10.dp))
+            Box(Modifier.weight(1f)) { BotBubble(text, maxFraction = 0.88f, onLongPress = onLongPress) }
         }
-        BotBubble(text)
     }
 }
 
@@ -691,31 +901,30 @@ private fun BreathingDots() {
     val c = LocalDs.current
     val t = rememberInfiniteTransition(label = "dots")
     val p by t.animateFloat(0f, 3f, infiniteRepeatable(tween(1200)), label = "p")
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
         repeat(3) { i ->
             val on = (p.toInt() % 3) == i
-            Box(Modifier.size(6.dp).clip(CircleShape).background(c.ink2.copy(alpha = if (on) 0.9f else 0.3f)))
+            Box(Modifier.size(5.dp).clip(CircleShape).background(c.link.copy(alpha = if (on) 0.95f else 0.35f)))
         }
     }
 }
 
-/** Gray bubble with three breathing dots: the reply has not started yet. */
+/** No thinking card: one gray line with the small avatar, 「X 正在工作」 (or dots + 「X 正在输入…」 in a group). */
 @Composable
-private fun ThinkingBubble(label: String) {
+private fun WorkingLine(names: List<String>, key: String?, color: String?, inRoom: Boolean) {
     val c = LocalDs.current
-    Row(
-        Modifier.clip(RoundedCornerShape(18.dp)).background(c.bubble).padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        BreathingDots()
-        Spacer(Modifier.size(10.dp))
-        Text(label, color = c.ink2, fontSize = 15.sp)
+    val t = rememberInfiniteTransition(label = "work")
+    val a by t.animateFloat(0.45f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "a")
+    Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (inRoom) BreathingDots() else Avatar(names.firstOrNull() ?: "助手", 20, color, key = key ?: names.firstOrNull())
+        Spacer(Modifier.size(8.dp))
+        Text(Look.workingLabel(names, inRoom), color = c.ink3.copy(alpha = if (inRoom) 1f else a), fontSize = 14.sp)
     }
 }
 
-/** Waiting for a reply: dots while thinking, the reply in a bubble once it streams, a note if it failed. */
+/** Waiting for a reply: the working line, the reply in a bubble once it streams, a note if it failed. */
 @Composable
-fun WaitCard(wait: WaitState, onDismiss: () -> Unit) {
+fun WaitCard(wait: WaitState, onDismiss: () -> Unit, bot: BotInfo? = null, inRoom: Boolean = false, hideWorking: Boolean = false) {
     val c = LocalDs.current
     when (wait.phase) {
         WaitPhase.Streaming -> if (wait.text.isNotBlank()) {
@@ -735,30 +944,47 @@ fun WaitCard(wait: WaitState, onDismiss: () -> Unit) {
         }
         else -> Unit
     }
-    ThinkingBubble("思考中")
+    if (!hideWorking) WorkingLine(listOfNotNull(bot?.name), bot?.id, bot?.color, inRoom)
 }
 
-/** Input bar: white pill with a hint; inside it, mic when empty, send when typed, stop while a reply runs. */
+/** Input bar: round + on the left (files / camera / pictures); white pill with hint and mic; black round button: voice, send, or stop. */
 @Composable
 private fun Composer(
     text: String, sending: Boolean, onChange: (String) -> Unit, onSend: () -> Unit,
     hint: String,
     showStop: Boolean = false, stopping: Boolean = false, onStop: () -> Unit = {}, onVoice: () -> Unit = {},
+    onAttach: (String) -> Unit = {},
 ) {
     val c = LocalDs.current
     val canSend = text.isNotBlank() && !sending
     val stopMode = showStop && text.isBlank() && !sending
+    var plus by remember { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().background(c.bg).navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.Bottom,
     ) {
+        Box(Modifier.padding(bottom = 2.dp)) {
+            Box(
+                Modifier.size(40.dp).shadow(if (c.dark) 0.dp else 2.dp, CircleShape, clip = false).clip(CircleShape).background(c.card)
+                    .clickable { plus = true },
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Add, "添加", tint = c.ink, modifier = Modifier.size(22.dp)) }
+            DropdownMenu(expanded = plus, onDismissRequest = { plus = false }) {
+                MenuRow(Icons.Outlined.Folder, "选择文件") { plus = false; onAttach("file") }
+                MenuRow(Icons.Outlined.PhotoCamera, "拍照") { plus = false; onAttach("camera") }
+                MenuRow(Icons.Outlined.Image, "附加图片") { plus = false; onAttach("image") }
+            }
+        }
+        Spacer(Modifier.size(10.dp))
         Row(
-            Modifier.weight(1f).clip(RoundedCornerShape(22.dp)).background(c.input)
-                .border(1.dp, c.line, RoundedCornerShape(22.dp)).padding(start = 18.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+            Modifier.weight(1f).shadow(if (c.dark) 0.dp else 2.dp, RoundedCornerShape(22.dp), clip = false)
+                .clip(RoundedCornerShape(22.dp)).background(c.input)
+                .then(if (c.dark) Modifier.border(1.dp, c.line, RoundedCornerShape(22.dp)) else Modifier)
+                .padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
-            Box(Modifier.weight(1f).padding(vertical = 6.dp)) {
-                if (text.isEmpty()) Text(hint, color = c.ink3, fontSize = 16.sp, maxLines = 1)
+            Box(Modifier.weight(1f).padding(vertical = 8.dp)) {
+                if (text.isEmpty()) Text(hint, color = c.ink3, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 BasicTextField(
                     text, onChange, maxLines = 6,
                     textStyle = TextStyle(color = c.ink, fontSize = 16.sp, lineHeight = 22.sp),
@@ -769,26 +995,24 @@ private fun Composer(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            Spacer(Modifier.size(6.dp))
-            when {
-                sending -> Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(Modifier.size(16.dp), color = c.ink3, strokeWidth = 2.dp)
+            if (text.isEmpty() && !sending) Box(
+                Modifier.size(36.dp).clip(CircleShape).clickable(onClick = onVoice),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Mic, "说话输入", tint = c.ink3, modifier = Modifier.size(20.dp)) }
+            Spacer(Modifier.size(4.dp))
+            Box(
+                Modifier.size(36.dp).clip(CircleShape).background(c.user).clickable(
+                    enabled = !sending && !(stopMode && stopping),
+                    onClick = when { stopMode -> onStop; canSend -> onSend; else -> onVoice },
+                ),
+                contentAlignment = Alignment.Center,
+            ) {
+                when {
+                    sending || (stopMode && stopping) -> CircularProgressIndicator(Modifier.size(14.dp), color = c.userInk, strokeWidth = 2.dp)
+                    stopMode -> Icon(Icons.Filled.Stop, "停止", tint = c.userInk, modifier = Modifier.size(18.dp))
+                    canSend -> Icon(Icons.Filled.ArrowUpward, "发送", tint = c.userInk, modifier = Modifier.size(20.dp))
+                    else -> Icon(Icons.Filled.GraphicEq, "语音", tint = c.userInk, modifier = Modifier.size(20.dp))
                 }
-                stopMode -> Box(
-                    Modifier.size(32.dp).clip(CircleShape).background(c.user).clickable(enabled = !stopping, onClick = onStop),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (stopping) CircularProgressIndicator(Modifier.size(14.dp), color = c.userInk, strokeWidth = 2.dp)
-                    else Icon(Icons.Filled.Stop, "停止", tint = c.userInk, modifier = Modifier.size(18.dp))
-                }
-                canSend -> Box(
-                    Modifier.size(32.dp).clip(CircleShape).background(c.user).clickable(onClick = onSend),
-                    contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Filled.ArrowUpward, "发送", tint = c.userInk, modifier = Modifier.size(18.dp)) }
-                else -> Box(
-                    Modifier.size(32.dp).clip(CircleShape).clickable(onClick = onVoice),
-                    contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Filled.Mic, "说话输入", tint = c.ink3, modifier = Modifier.size(20.dp)) }
             }
         }
     }

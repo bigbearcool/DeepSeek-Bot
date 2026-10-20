@@ -25,6 +25,7 @@ import com.deepseek.dshmobile.ui.LoadingScreen
 import com.deepseek.dshmobile.ui.PairScreen
 import com.deepseek.dshmobile.ui.Screen
 import com.deepseek.dshmobile.ui.TeamScreen
+import com.deepseek.dshmobile.ui.SettingsScreen
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 
@@ -72,8 +73,9 @@ class MainActivity : ComponentActivity() {
             if (uri.scheme.equals("dshmb", ignoreCase = true)) vm.applyScannedPayload(uri.toString())
         }
         setContent {
-            DsTheme {
-                val state by vm.state.collectAsState()
+            val state by vm.state.collectAsState()
+            val dark = when (state.prefs.theme) { "light" -> false; "dark" -> true; else -> androidx.compose.foundation.isSystemInDarkTheme() }
+            DsTheme(dark = dark) {
                 when (state.screen) {
                     Screen.Loading -> LoadingScreen()
                     Screen.Pair -> PairScreen(
@@ -101,7 +103,21 @@ class MainActivity : ComponentActivity() {
                         onNewRoom = vm::openNewRoom,
                         onOpenChat = vm::openChat,
                         onAnswer = vm::answerApproval,
+                        onSettings = vm::openSettings,
+                        onTogglePin = vm::togglePin,
+                        onToggleUnread = vm::toggleUnread,
+                        onHide = vm::hideChat,
                     )
+                    Screen.Settings -> {
+                        BackHandler { vm.closeSettings() }
+                        SettingsScreen(
+                            state = state,
+                            onClose = vm::closeSettings,
+                            onTheme = vm::setTheme,
+                            onUnhideAll = vm::unhideAll,
+                            onLogout = { vm.logout() },
+                        )
+                    }
                     Screen.NewBot -> {
                         BackHandler { if (state.folderListing != null) vm.closeFolderBrowser() else vm.closeForm() }
                         NewBotScreen(
@@ -132,12 +148,14 @@ class MainActivity : ComponentActivity() {
                             onBack = vm::backToTeam,
                             onLoadMore = { vm.loadMoreHistory() },
                             onComposeChange = vm::onComposeChange,
-                            onSend = vm::sendMessage,
+                            onSend = vm::sendWithReply,
                             onDismissWait = vm::dismissWait,
                             onStop = vm::stopReply,
                             onAnswer = vm::answerApproval,
                             onVoice = ::startVoice,
                             onRefresh = { vm.loadTeam() },
+                            onReply = vm::setReply,
+                            onAttach = vm::attachLater,
                         )
                     }
                 }

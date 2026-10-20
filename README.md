@@ -15,7 +15,7 @@ English | [中文](README.zh.md)
 
 这是在上游 DeepSeek-Bot 基础上改的版本，让你在 DeepSeek Harness（DSH）里养一群 Bot，并且能用手机和它们聊天。仓库里主要有这几块：
 
-- **`ds-bot/`**（当前 0.1.9）：DS Bot 插件本体。在 DSH 里创建 Bot、和 Bot 单聊、拉 Bot 进群聊。本 fork 在上游基础上加了「每个 Bot 单独指定 Agent 预设」等改动。
+- **`ds-bot/`**（当前 0.2.0）：DS Bot 插件本体。在 DSH 里创建 Bot、和 Bot 单聊、拉 Bot 进群聊。本 fork 在上游基础上加了「每个 Bot 单独指定 Agent 预设」等改动。
 - **`dsh-mobile-bridge/`**（当前 0.0.19）：DSH 插件，给手机开一个专用接口，负责配对和收发消息。
 - **`dsh-mobile-android/`**（当前 0.2.4）：Android 手机 App。
 - **`app/`、`docker/`**：上游自带的桌面应用和 Docker 镜像，用法见下面的英文原文。
@@ -26,7 +26,7 @@ English | [中文](README.zh.md)
 
 ```sh
 cd ds-bot
-npm pack            # 生成 ds-bot-0.1.9.tgz
+npm pack            # 生成 ds-bot-0.2.0.tgz
 ```
 
 在 DSH 的插件页里「添加插件」时填这个 tgz 的完整路径，或者用命令行 `dsh plugin add <tgz 路径>`，启用后重启 DSH。
@@ -80,6 +80,7 @@ cd dsh-mobile-android
 
 | 日期 | 合并提交 | 上游 PR |
 |---|---|---|
+| 2026-10-20 | `MERGESHA` | #366 可在 DS Bot 设置里修改团队工作区和数据位置（桌面应用可迁移数据目录）<br>#367 发布 0.2.0：版本号、changelog 和桌面应用安装说明<br>#368 普通会话引导使用可用的提问工具<br>#369 转发消息正文里不再带方括号的 Bot 名 |
 | 2026-10-20 | `4b722f6` | #365 macOS 应用改为 zip 打包发布（不再使用 dmg） |
 | 2026-10-20 | `f7b8fb5` | #363 Windows 桌面无边框窗口，Win11 启用 Mica；stylesheet 加载后重测 caption 颜色；右侧栏避开 caption 带 |
 | 2026-10-20 | `d02f761` | #354 macOS 通用包单独报错（Stop a universal macOS build with its own message）<br>#355 macOS 加 File 菜单，Cmd+W 关窗<br>#358 发布演练把安装包保留为 workflow 产物<br>#359 发布演练打包不再访问 registry<br>#360 首次运行中途退出时什么都不写入<br>#361 会话要等 DSH 列表里有了才打开 |
@@ -117,13 +118,24 @@ cd dsh-mobile-android
 ---
 
 
-![version](https://img.shields.io/badge/version-v0.1_preview-blue) ![DSH](https://img.shields.io/badge/DSH-0.2.1--rc.2-4D6BFE) ![license](https://img.shields.io/badge/license-Apache_2.0-green)
+![version](https://img.shields.io/badge/version-v0.2_preview-blue) ![DSH](https://img.shields.io/badge/DSH-0.2.1--rc.2-4D6BFE) ![license](https://img.shields.io/badge/license-Apache_2.0-green)
 
 DeepSeek Bot (DS Bot) is a bot plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH). It turns DSH into bots. You create your own bots, then talk and work with them.
 
 ![Say one sentence to Chief, and it sets up the bots and the group chat](docs/images/team.png)
 
 ## Install
+
+**Desktop app (Windows, macOS)**
+
+The desktop app brings its own DSH, so you don't need to install DSH first. Download it from [Releases](https://github.com/Fei2411/DeepSeek-Bot/releases):
+
+- Windows (x64): `DeepSeek-Bot-<version>-win-x64.exe`. Run it; it installs for your user only, without administrator rights. If Windows shows "Windows protected your PC", select **More info** → **Run anyway**.
+- macOS: `DeepSeek-Bot-<version>-mac-arm64.zip` for an Apple chip, `DeepSeek-Bot-<version>-mac-x64.zip` for Intel. Safari unzips it by itself; drag **DeepSeek Bot** into **Applications** and open it. When macOS says it cannot check the app, open **System Settings** → **Privacy & Security** and select **Open Anyway**.
+
+At the first start the app asks where to keep its data and the Bots' files, and offers to copy a Bot team from your DSH (it only reads your DSH). Set up a model in its settings. The Windows app updates itself; the macOS app tells you when a new version is ready to download.
+
+**As a plugin in DSH**
 
 First install DSH and set up at least one model in it. DS Bot uses the models from DSH.
 
@@ -133,7 +145,7 @@ First install DSH and set up at least one model in it. DS Bot uses the models fr
 2. In **Package name or address**, enter `ds-bot`. In mainland China, set **Registry** to **Mainland China mirror**.
 3. Select **Install**, then **Enable now**. If DSH says the change takes effect at the next start, quit DSH completely and open it again.
 
-If npm is not reachable, in step 2 you can also enter the full path of `ds-bot-0.1.7.tgz` downloaded from [Releases](https://github.com/Fei2411/DeepSeek-Bot/releases), or `github:Fei2411/DeepSeek-Bot#v0.1.7&path:/ds-bot` (needs Git).
+If npm is not reachable, in step 2 you can also enter the full path of `ds-bot-0.2.0.tgz` downloaded from [Releases](https://github.com/Fei2411/DeepSeek-Bot/releases), or `github:Fei2411/DeepSeek-Bot#v0.2.0&path:/ds-bot` (needs Git).
 
 **DSH Web (Windows, macOS, Linux)**
 

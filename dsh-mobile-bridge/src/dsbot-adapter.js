@@ -248,5 +248,43 @@ export function createDsBotAdapter({ dshHome, botHome, ctx, logger = console } =
     }
   }
 
-  return { statePath, team, history, send, chatOwners, groupOwners, roomHistory, readState }
+  /** Newest events of one Session (dsh sessionController.page), for the list's preview/unread. */
+  async function tail(sessionId, maxMessages = 20) {
+    const sc = sessionController()
+    if (!sc?.page) return { events: [] }
+    // Same bound as ds-bot's own partPage: the live Session's seq (page refuses a bound
+    // past the persisted cursor).
+    let throughSeq
+    if (typeof sc.resolveAgent === 'function') {
+      const resolved = await sc.resolveAgent(sessionId)
+      const seq = resolved && !('error' in resolved) ? resolved.agent?.session?.seq : undefined
+      if (Number.isFinite(seq)) throughSeq = Number(seq) - 1
+    }
+    if (throughSeq === undefined) throughSeq = Number.MAX_SAFE_INTEGER - 1
+    if (throughSeq < 0) return { events: [] }
+    const page = await sc.page({ address: { kind: 'session', sessionId }, throughSeq, maxMessages }, AbortSignal.timeout(HISTORY_TIMEOUT_MS))
+    return { events: (page.records ?? []).map(record => record.event ?? record) }
+  }
+
+  /**
+   * Stop a Bot's running reply in its own chat: dsh sessionController.cancel, the same call
+   * dsh's own stop button makes (pending inbox kept). Not attached = nothing is running.
+   */
+  async function cancel({ botId } = {}) {
+    const state = await readState()
+    const bot = state?.bots?.[botId]
+    if (!bot) throw Object.assign(new Error('Unknown Bot'), { status: 404 })
+    const sessionId = bot.sessionId ?? bot.id
+    const sc = sessionController()
+    if (typeof sc?.cancel !== 'function') throw Object.assign(new Error('stop is not available in this host'), { status: 501 })
+    try {
+      const result = await sc.cancel({ sessionId })
+      return { stopped: result?.accepted !== false, botId, sessionId }
+    } catch (error) {
+      if (error?.code === 'session/not-found') return { stopped: false, botId, sessionId, idle: true }
+      throw Object.assign(new Error(error?.message ?? String(error)), { status: 409, code: error?.code })
+    }
+  }
+
+  return { statePath, team, history, send, chatOwners, groupOwners, roomHistory, readState, tail, cancel }
 }

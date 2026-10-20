@@ -154,3 +154,18 @@ Only these ds-bot endpoints are reachable (`DSBOT_ALLOWED`); without ds-bot load
   `publish` → `round.end` (with `replied`, `failed`, `passed`). The stage after the last mark is where it stops.
 
 The important marks also go to stderr as `[mobile-bridge] [group] ...` (docker logs / the terminal running dsh).
+
+## Conversation list, unread, stop, approvals (0.0.11)
+
+All require the device Bearer token (401 without one).
+
+| Endpoint | Reuses |
+|---|---|
+| `GET /chats/list` | ds-bot state.json rooms (preview, log seq) + dsh `sessionController.page` (Bot chat tail) + ds-bot `state` live `work` (running, approvals) |
+| `POST /chats/read` `{kind:'bot'\|'room', id, seq?}` | per-device read marks in the bridge store (`devices[id].reads`) |
+| `POST /chats/stop` `{botId}` | dsh `sessionController.cancel({sessionId})` |
+| `POST /rooms/stop` `{roomId, botId?}` | ds-bot `stop-member-work` for each member at work |
+| `GET /approvals` | ds-bot `work.approvals` (tool names shown as plain words) |
+| `POST /approvals/answer` `{id, choice:'allow'\|'reject'}` | ds-bot `approval-answer` (validation in ds-bot) |
+
+A Bot's own-chat approval is `answerable: false`: ds-bot leaves it to dsh's own card.

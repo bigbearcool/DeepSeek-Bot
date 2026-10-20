@@ -19,6 +19,8 @@ const EXACT = {
   'This DeepSeek Harness cannot list folders': '这台电脑不能在手机上浏览文件夹，请直接填写完整路径',
   'Nothing to send': '没有要发送的内容',
   'DS Bot is not running on this computer': '电脑上的 DS Bot 没有在运行',
+  'This approval is no longer open': '这个请求已经处理过了',
+  'Choose allow or reject': '请选择同意或拒绝',
 }
 const PATTERNS = [
   [/^A Bot named (.+) already exists$/, '已经有叫 $1 的助手了'],

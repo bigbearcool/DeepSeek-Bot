@@ -7,6 +7,7 @@ import { lanUrl } from './lan.js'
 import { bearer, error, html, json, pathOf, readJson } from './http.js'
 import { pairPageHtml } from './pair-page.js'
 import { pairPayload, qrSvg } from './qr.js'
+import { createChatList } from './chat-list.js'
 
 /** Paths never served on the device listener (host-only, behind dsh login on 3080). */
 export const HOST_ONLY_PATHS = new Set([
@@ -72,6 +73,8 @@ async function dsCall(run) {
 export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
   const { store, adapter, feed, dsbot } = rt
   const diag = rt.diag ?? { note() {}, snapshot: () => ({}) }
+  rt.chatList ??= createChatList({ adapter, dsbot, store, logger: rt.ctx?.logger ?? console })
+  const chatList = rt.chatList
   const resolveUrls = async () => {
     const s = await store.getSettings()
     const publicUrl = cleanHttpUrl(s.publicUrl) || appUrlOf(rt.config)
@@ -310,6 +313,85 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
       })
     }
 
+    if (method === 'GET' && sub === '/chats/list') {
+      return withAuth(request, async (device) => {
+        try {
+          return json({ ok: true, ...(await chatList.list(device.id)) })
+        } catch (err) {
+          return error(err.status ?? 500, err.message)
+        }
+      })
+    }
+
+    if (method === 'POST' && sub === '/chats/read') {
+      return withAuth(request, async (device) => {
+        const body = await readJson(request)
+        const kind = body.kind === 'room' ? 'room' : body.kind === 'bot' ? 'bot' : null
+        const id = typeof body.id === 'string' ? body.id : ''
+        if (!kind || !id) return error(400, 'kind and id required')
+        try {
+          const seq = Number.isFinite(body.seq) ? body.seq : await chatList.positionOf(kind, id)
+          const reads = await store.markRead(device.id, { [`${kind}:${id}`]: seq })
+          return json({ ok: true, kind, id, seq: reads[`${kind}:${id}`] ?? seq })
+        } catch (err) {
+          return error(err.status ?? 500, err.message, zhMessage(err.message) ? { zh: zhMessage(err.message) } : {})
+        }
+      })
+    }
+
+    if (method === 'POST' && sub === '/chats/stop') {
+      return withAuth(request, async () => {
+        const body = await readJson(request)
+        const botId = typeof body.botId === 'string' ? body.botId : ''
+        if (!botId) return error(400, 'botId required')
+        try {
+          return json({ ok: true, ...(await adapter.cancel({ botId })) })
+        } catch (err) {
+          return error(err.status ?? 500, err.message, { ...(err.code ? { code: err.code } : {}), ...(zhMessage(err.message) ? { zh: zhMessage(err.message) } : {}) })
+        }
+      })
+    }
+
+    if (method === 'POST' && sub === '/rooms/stop') {
+      return withAuth(request, async () => dsCall(async () => {
+        const body = await readJson(request)
+        const roomId = typeof body.roomId === 'string' ? body.roomId : ''
+        if (!roomId) throw Object.assign(new Error('roomId required'), { status: 400 })
+        let members = typeof body.botId === 'string' && body.botId ? [body.botId] : null
+        if (!members) {
+          const live = await dsbot.call('state', {})
+          members = (live?.work?.rooms?.[roomId] ?? []).map(item => item.botId).filter(Boolean)
+        }
+        let stopped = 0
+        for (const botId of members) {
+          if (await dsbot.call('stop-member-work', { roomId, botId })) stopped++
+        }
+        return { ok: true, roomId, stopped }
+      }))
+    }
+
+    if (method === 'GET' && sub === '/approvals') {
+      return withAuth(request, async (device) => {
+        try {
+          const view = await chatList.list(device.id)
+          return json({ ok: true, approvals: view.approvals ?? [] })
+        } catch (err) {
+          return error(err.status ?? 500, err.message)
+        }
+      })
+    }
+
+    if (method === 'POST' && sub === '/approvals/answer') {
+      return withAuth(request, async () => dsCall(async () => {
+        const body = await readJson(request)
+        const id = typeof body.id === 'string' ? body.id : ''
+        if (!id) throw Object.assign(new Error('id required'), { status: 400 })
+        // ds-bot validates the choice ('allow' | 'reject') and whether the request is still open.
+        await dsbot.call('approval-answer', { id, choice: body.choice })
+        return { ok: true, id, choice: body.choice }
+      }))
+    }
+
     if (method === 'GET' && sub === '/bots/options') {
       return withAuth(request, async () => dsCall(async () => {
         await dsbot.call('models').catch(() => {})
@@ -478,6 +560,12 @@ export function installRoutes(rt) {
     ['/rooms/create', ['POST']],
     ['/rooms/history', ['GET']],
     ['/rooms/send', ['POST']],
+    ['/rooms/stop', ['POST']],
+    ['/chats/list', ['GET']],
+    ['/chats/read', ['POST']],
+    ['/chats/stop', ['POST']],
+    ['/approvals', ['GET']],
+    ['/approvals/answer', ['POST']],
     ['/stream', ['GET']],
     ['/diagnostics', ['GET']],
     ['/devices', ['GET']],

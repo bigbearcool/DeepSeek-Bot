@@ -14,6 +14,8 @@ export const DSBOT_ROUTE = '/api/bot'
 /** ds-bot endpoints the phone may reach. Anything else is refused before ds-bot sees it. */
 export const DSBOT_ALLOWED = new Set([
   'state', 'models', 'efforts', 'folders', 'folder-list', 'create-bot', 'create-room', 'send',
+  // stop a member's reply in a group; answer a group member's approval
+  'stop-member-work', 'approval-answer',
   // read-only, for GET /diagnostics
   'room-progress',
 ])

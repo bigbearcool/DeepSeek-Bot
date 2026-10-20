@@ -132,5 +132,28 @@ export function createStore({ home, now = Date.now } = {}) {
     return getSettings()
   }
 
-  return { path, getSettings, setSettings, beginPair, activePair, completePair, issueAccess, requireAccess, revoke, listDevices, load }
+  /** Read positions of one device: { 'bot:<id>': eventSeq, 'room:<id>': logSeq }. */
+  async function readMarks(deviceId) {
+    await load()
+    return { ...(data.devices[String(deviceId ?? '')]?.reads ?? {}) }
+  }
+
+  /** Move read positions forward (never back). onlyNew: set only keys not yet known. */
+  async function markRead(deviceId, marks = {}, { onlyNew = false } = {}) {
+    await load()
+    const device = data.devices[String(deviceId ?? '')]
+    if (!device) return {}
+    device.reads ??= {}
+    let changed = false
+    for (const [key, value] of Object.entries(marks)) {
+      if (!/^(bot|room):.{1,200}$/.test(key) || !Number.isFinite(value)) continue
+      const old = device.reads[key]
+      if (onlyNew && Number.isFinite(old)) continue
+      if (!Number.isFinite(old) || value > old) { device.reads[key] = value; changed = true }
+    }
+    if (changed) await save()
+    return { ...device.reads }
+  }
+
+  return { path, readMarks, markRead, getSettings, setSettings, beginPair, activePair, completePair, issueAccess, requireAccess, revoke, listDevices, load }
 }

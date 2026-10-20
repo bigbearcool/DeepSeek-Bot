@@ -11,6 +11,7 @@ export const HOST_ONLY_PATHS = new Set([
 ])
 /** Paths reachable on the device listener without a bearer token. */
 export const DEVICE_PUBLIC_PATHS = new Set(['/health', '/auth/pair/complete', '/auth/token'])
+export const SEND_DEDUPE_MS = 10 * 60_000
 export const RATE_LIMITED_PATHS = new Set(['/auth/pair/complete', '/auth/token'])
 
 /**
@@ -29,6 +30,8 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
     return { publicUrl, lanUrl: lan, appUrl: publicUrl || lan, source: publicUrl ? 'public' : lan ? 'lan' : 'none' }
   }
   const device = surface === 'device'
+  /** Idempotency: same device + clientMessageId within SEND_DEDUPE_MS never re-prompts. */
+  const recentSends = new Map()
 
   const withAuth = async (request, next) => {
     const token = bearer(request)
@@ -171,12 +174,23 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
     }
 
     if (method === 'POST' && sub === '/chats/send') {
-      return withAuth(request, async () => {
+      return withAuth(request, async (device) => {
         const body = await readJson(request)
         try {
+          const clientMessageId = typeof body.clientMessageId === 'string' && body.clientMessageId.length <= 128
+            ? body.clientMessageId : null
+          const key = clientMessageId ? `${device.id}:${clientMessageId}` : null
+          const seen = key ? recentSends.get(key) : undefined
+          if (seen) return json({ ...seen, duplicate: true })
           const result = await adapter.send({ botId: body.botId, text: body.text })
           if (result.stub) return json({ ok: false, ...result }, result.status ?? 501)
-          return json({ ok: true, ...result })
+          const out = { ok: true, ...result, ...(clientMessageId ? { clientMessageId } : {}) }
+          if (key) {
+            recentSends.set(key, out)
+            setTimeout(() => recentSends.delete(key), SEND_DEDUPE_MS).unref?.()
+            feed.notePending?.(body.botId, String(body.text ?? '').trim(), clientMessageId)
+          }
+          return json(out)
         } catch (err) {
           return error(err.status ?? 500, err.message)
         }

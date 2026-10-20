@@ -91,7 +91,7 @@ test('health is open', async (t) => {
   const { status, body } = await h.json('GET', '/api/mobile-bridge/v1/health')
   assert.equal(status, 200)
   assert.equal(body.name, 'dsh-mobile-bridge')
-  assert.equal(body.version, '0.0.7')
+  assert.equal(body.version, '0.0.8')
   assert.equal(body.ok, true)
 })
 
@@ -321,4 +321,20 @@ test('devices revoke marks device revoked', async (t) => {
   assert.equal(after.body.devices[0].revoked, true)
   const team = await h.json('GET', '/api/mobile-bridge/v1/team', { headers })
   assert.equal(team.status, 401)
+})
+
+test('send with same clientMessageId is idempotent (prompt once)', async (t) => {
+  const h = start({
+    bots: { chief: { id: 'chief', name: 'Chief', sessionId: 'sess-chief' } },
+  })
+  t.after(h.stop)
+  const headers = await authed(h)
+  const req = { headers, body: { botId: 'chief', text: '只发一次', clientMessageId: 'c-123' } }
+  const a = await h.json('POST', '/api/mobile-bridge/v1/chats/send', req)
+  const b = await h.json('POST', '/api/mobile-bridge/v1/chats/send', req)
+  assert.equal(a.status, 200)
+  assert.equal(a.body.clientMessageId, 'c-123')
+  assert.equal(b.status, 200)
+  assert.equal(b.body.duplicate, true)
+  assert.equal(h.prompts.length, 1)
 })

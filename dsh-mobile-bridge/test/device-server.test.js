@@ -51,7 +51,7 @@ test('3081: health open, protected routes 401 without token', async (t) => {
   const h = await start(); t.after(h.stop)
   const r = await h.dev('GET', '/health')
   assert.equal(r.status, 200)
-  assert.equal((await r.json()).version, '0.0.7')
+  assert.equal((await r.json()).version, '0.0.8')
   for (const [m, p] of [['GET', '/team'], ['GET', '/chats/history?botId=chief'], ['POST', '/chats/send'], ['GET', '/stream'], ['GET', '/devices']]) {
     const res = await h.dev(m, p, m === 'POST' ? { body: {} } : {})
     assert.equal(res.status, 401, `${m} ${p}`)

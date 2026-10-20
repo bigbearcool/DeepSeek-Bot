@@ -46,6 +46,24 @@ export function createLiveFeed({ ctx, adapter }) {
   }
 
   const writing = new Map()
+  /** botId -> [{ text, clientMessageId, at }] awaiting their user/message echo. */
+  const pending = new Map()
+  const notePending = (botId, text, clientMessageId) => {
+    if (!botId || !clientMessageId) return
+    const now = Date.now()
+    const list = (pending.get(botId) ?? []).filter(p => now - p.at < 120_000)
+    list.push({ text, clientMessageId, at: now })
+    pending.set(botId, list)
+  }
+  const claimPending = (botId, item) => {
+    if (item?.kind !== 'user') return item
+    const list = pending.get(botId)
+    if (!list?.length) return item
+    const i = list.findIndex(p => p.text === (item.text ?? '').trim())
+    if (i < 0) return item
+    const [hit] = list.splice(i, 1)
+    return { ...item, clientMessageId: hit.clientMessageId }
+  }
 
   // Subscribe once for the process; fan-out to connected phones.
   if (typeof ctx.on === 'function') {
@@ -56,7 +74,7 @@ export function createLiveFeed({ ctx, adapter }) {
       if (botId === undefined) return
       const state = await adapter.readState()
       for (const item of displayItems(session.id, [event], state?.exchangeTurns ?? {})) {
-        publish('message', { botId, sessionId: session.id, item }, { botId })
+        publish('message', { botId, sessionId: session.id, item: claimPending(botId, item) }, { botId })
       }
       if (event.type === 'tool/call') bumpLive()
     })
@@ -141,5 +159,5 @@ export function createLiveFeed({ ctx, adapter }) {
     })
   }
 
-  return { openStream, publish, clientCount: () => clients.size }
+  return { openStream, publish, notePending, claimPending, clientCount: () => clients.size }
 }

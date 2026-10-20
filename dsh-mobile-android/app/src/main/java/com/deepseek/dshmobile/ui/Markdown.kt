@@ -29,8 +29,8 @@ fun MarkdownText(text: String, modifier: Modifier = Modifier) {
             .usePlugin(object : AbstractMarkwonPlugin() {
                 override fun configureTheme(builder: MarkwonTheme.Builder) {
                     builder
-                        .codeBackgroundColor(c.bubble.toArgb())
-                        .codeBlockBackgroundColor(c.bubble.toArgb())
+                        .codeBackgroundColor(c.card.toArgb())
+                        .codeBlockBackgroundColor(c.card.toArgb())
                         .codeTextColor(c.ink.toArgb())
                         .codeBlockTextColor(c.ink.toArgb())
                         .blockQuoteColor(c.ink3.toArgb())

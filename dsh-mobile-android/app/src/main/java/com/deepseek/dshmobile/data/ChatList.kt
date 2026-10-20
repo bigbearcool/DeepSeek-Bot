@@ -92,22 +92,20 @@ object ChatListLogic {
         else -> a.botName ?: "助手"
     }
 
-    /** Short time for the list: 刚刚 / N 分钟前 / 14:05 / 昨天 / 10月18日 / 2025/10/18. */
+    /** Short time for the list: 刚刚 / 上午 8:41 / 昨天 / 星期二 / 10月18日 / 2025/10/18. */
     fun timeLabel(at: Long?, now: Long = System.currentTimeMillis()): String {
         if (at == null || at <= 0) return ""
-        val diff = now - at
-        if (diff in 0 until 60_000) return "刚刚"
-        if (diff in 60_000 until 3_600_000) return "${diff / 60_000} 分钟前"
-        val a = Calendar.getInstance().apply { timeInMillis = at }
-        val n = Calendar.getInstance().apply { timeInMillis = now }
-        val sameYear = a.get(Calendar.YEAR) == n.get(Calendar.YEAR)
-        val dayA = a.get(Calendar.DAY_OF_YEAR)
-        val dayN = n.get(Calendar.DAY_OF_YEAR)
+        if (now - at in 0 until 60_000) return "刚刚"
+        val d = Look.daysBetween(at, now)
         return when {
-            sameYear && dayA == dayN -> "%02d:%02d".format(a.get(Calendar.HOUR_OF_DAY), a.get(Calendar.MINUTE))
-            sameYear && dayN - dayA == 1 -> "昨天"
-            sameYear -> "${a.get(Calendar.MONTH) + 1}月${a.get(Calendar.DAY_OF_MONTH)}日"
-            else -> "${a.get(Calendar.YEAR)}/${a.get(Calendar.MONTH) + 1}/${a.get(Calendar.DAY_OF_MONTH)}"
+            d <= 0 -> Look.clock(at)
+            d in 1..6 -> Look.day(at, now)
+            else -> {
+                val a = Calendar.getInstance().apply { timeInMillis = at }
+                val n = Calendar.getInstance().apply { timeInMillis = now }
+                if (a.get(Calendar.YEAR) == n.get(Calendar.YEAR)) "${a.get(Calendar.MONTH) + 1}月${a.get(Calendar.DAY_OF_MONTH)}日"
+                else "${a.get(Calendar.YEAR)}/${a.get(Calendar.MONTH) + 1}/${a.get(Calendar.DAY_OF_MONTH)}"
+            }
         }
     }
 

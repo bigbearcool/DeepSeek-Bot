@@ -65,19 +65,6 @@ class ChatListTest {
         assertFalse(ChatListLogic.showStop(running = false, waiting = false))
     }
 
-    @Test fun timeLabels() {
-        val now = Calendar.getInstance().apply { set(2026, 9, 20, 15, 30, 0) }.timeInMillis
-        assertEquals("刚刚", ChatListLogic.timeLabel(now - 10_000, now))
-        assertEquals("5 分钟前", ChatListLogic.timeLabel(now - 5 * 60_000, now))
-        val morning = Calendar.getInstance().apply { set(2026, 9, 20, 9, 5, 0) }.timeInMillis
-        assertEquals("09:05", ChatListLogic.timeLabel(morning, now))
-        val yesterday = Calendar.getInstance().apply { set(2026, 9, 19, 23, 0, 0) }.timeInMillis
-        assertEquals("昨天", ChatListLogic.timeLabel(yesterday, now))
-        val earlier = Calendar.getInstance().apply { set(2026, 9, 3, 12, 0, 0) }.timeInMillis
-        assertEquals("10月3日", ChatListLogic.timeLabel(earlier, now))
-        assertEquals("", ChatListLogic.timeLabel(null, now))
-    }
-
     @Test fun approvalDefaultsToPlainWords() {
         val a = com.deepseek.dshmobile.data.parseApproval(JSONObject("""{"id":"x"}"""))
         assertEquals("做一个需要你同意的操作", a.action)

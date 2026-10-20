@@ -144,6 +144,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun onBaseUrlChange(v: String) = _state.update { it.copy(baseUrl = v) }
     fun onPairInputChange(v: String) = _state.update { it.copy(pairInput = v) }
     fun onComposeChange(v: String) = _state.update { it.copy(composeText = v) }
+    /** Text from the phone's own voice input goes after what is already typed. */
+    fun addVoiceText(spoken: String) = _state.update { it.copy(composeText = com.deepseek.dshmobile.data.Look.mergeVoice(it.composeText, spoken)) }
+    fun showNotice(text: String) = _state.update { it.copy(notice = text) }
     fun clearNotice() = _state.update { it.copy(notice = null) }
 
     private fun friendly(e: Throwable): String = when (e) {
@@ -187,7 +190,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             return@launch
         }
         if (_state.value.baseUrl.isBlank()) {
-            _state.update { it.copy(notice = "请先扫码，或在下方填写服务器地址") }
+            _state.update { it.copy(notice = "请先扫码，或在下方填写电脑地址") }
             return@launch
         }
         _state.update { it.copy(busy = true, notice = null) }

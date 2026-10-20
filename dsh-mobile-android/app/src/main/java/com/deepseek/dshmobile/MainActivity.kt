@@ -45,6 +45,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val voiceLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val spoken = result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+        if (result.resultCode == RESULT_OK && !spoken.isNullOrBlank()) vm.addVoiceText(spoken)
+    }
+
+    /** Opens the phone's own voice input; the words land in the input box. */
+    private fun startVoice() {
+        val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "请说话")
+        if (intent.resolveActivity(packageManager) == null) {
+            vm.showNotice("这台手机没有语音输入，可以用键盘上的话筒")
+            return
+        }
+        runCatching { voiceLauncher.launch(intent) }.onFailure { vm.showNotice("没能打开语音输入") }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
@@ -119,6 +136,8 @@ class MainActivity : ComponentActivity() {
                             onDismissWait = vm::dismissWait,
                             onStop = vm::stopReply,
                             onAnswer = vm::answerApproval,
+                            onVoice = ::startVoice,
+                            onRefresh = { vm.loadTeam() },
                         )
                     }
                 }

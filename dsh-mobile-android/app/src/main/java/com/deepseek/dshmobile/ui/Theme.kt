@@ -27,23 +27,27 @@ data class DsColors(
     val danger: Color,
     val green: Color,
     val tagBg: Color,
+    val input: Color,
+    val secondary: Color,
     val dark: Boolean,
 )
 
 val LightDs = DsColors(
-    bg = Color(0xFFFCFCFC), surface = Color(0xFFF7F7F7), card = Color(0xFFFFFFFF),
-    ink = Color(0xFF141414), ink2 = Color(0x99141414), ink3 = Color(0x5C141414),
-    line = Color(0x14141414), bubble = Color(0xFFEEEEEE), user = Color(0xFF070707),
-    userInk = Color(0xFFFCFCFC), accent = Color(0xFF4D6BFE), danger = Color(0xFFE02135),
-    green = Color(0xFF00C972), tagBg = Color(0x0F141414), dark = false,
+    bg = Color(0xFFFCFCFC), surface = Color(0xFFF8F8F8), card = Color(0xFFFFFFFF),
+    ink = Color(0xFF0B0B0B), ink2 = Color(0xFF6E6E73), ink3 = Color(0xFFA8A8AD),
+    line = Color(0x140B0B0B), bubble = Color(0xFFF1F2F1), user = Color(0xFF0B0B0B),
+    userInk = Color(0xFFFFFFFF), accent = Color(0xFF4D6BFE), danger = Color(0xFFE02135),
+    green = Color(0xFF00C972), tagBg = Color(0x0F0B0B0B), input = Color(0xFFFFFFFF),
+    secondary = Color(0xFFE6E7E6), dark = false,
 )
 
 val DarkDs = DsColors(
-    bg = Color(0xFF141414), surface = Color(0xFF1B1B1B), card = Color(0xFF1F1F1F),
-    ink = Color(0xFFF2F2F2), ink2 = Color(0x99F2F2F2), ink3 = Color(0x5CF2F2F2),
-    line = Color(0x14FFFFFF), bubble = Color(0xFF262626), user = Color(0xFFF2F2F2),
-    userInk = Color(0xFF141414), accent = Color(0xFF6B85FF), danger = Color(0xFFFF5566),
-    green = Color(0xFF00C972), tagBg = Color(0x17FFFFFF), dark = true,
+    bg = Color(0xFF0E0E0E), surface = Color(0xFF1A1A1A), card = Color(0xFF2A2A2A),
+    ink = Color(0xFFF2F2F2), ink2 = Color(0xFFA1A1A6), ink3 = Color(0xFF6E6E73),
+    line = Color(0x1AFFFFFF), bubble = Color(0xFF222222), user = Color(0xFFF2F2F2),
+    userInk = Color(0xFF0B0B0B), accent = Color(0xFF6B85FF), danger = Color(0xFFFF5566),
+    green = Color(0xFF00C972), tagBg = Color(0x17FFFFFF), input = Color(0xFF1C1C1C),
+    secondary = Color(0xFF2C2C2C), dark = true,
 )
 
 val LocalDs = staticCompositionLocalOf { LightDs }

@@ -7,6 +7,15 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import com.deepseek.dshmobile.util.AvatarImage
+import com.deepseek.dshmobile.ui.NewBotScreen
+import com.deepseek.dshmobile.ui.NewRoomScreen
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import com.deepseek.dshmobile.ui.AppViewModel
@@ -25,6 +34,15 @@ class MainActivity : ComponentActivity() {
     private val scanLauncher = registerForActivityResult(ScanContract()) { result ->
         val contents = result.contents ?: return@registerForActivityResult
         vm.applyScannedPayload(contents)
+    }
+
+    private val photoLauncher = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        lifecycleScope.launch {
+            runCatching { withContext(Dispatchers.Default) { AvatarImage.fromUri(this@MainActivity, uri) } }
+                .onSuccess { vm.setAvatarImage(it) }
+                .onFailure { vm.showFormError(it.message ?: "这张图片用不了，请换一张") }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,7 +79,33 @@ class MainActivity : ComponentActivity() {
                         onRefresh = { vm.loadTeam() },
                         onOpen = { vm.openBot(it) },
                         onLogout = { vm.logout() },
+                        onOpenRoom = { vm.openRoom(it) },
+                        onNewBot = vm::openNewBot,
+                        onNewRoom = vm::openNewRoom,
                     )
+                    Screen.NewBot -> {
+                        BackHandler { if (state.folderListing != null) vm.closeFolderBrowser() else vm.closeForm() }
+                        NewBotScreen(
+                            state = state,
+                            onChange = vm::updateBotDraft,
+                            onPickPhoto = { photoLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                            onBrowse = { vm.browseFolder(it) },
+                            onCloseBrowse = vm::closeFolderBrowser,
+                            onCreate = vm::createBot,
+                            onCancel = vm::closeForm,
+                        )
+                    }
+                    Screen.NewRoom -> {
+                        BackHandler { vm.closeForm() }
+                        NewRoomScreen(
+                            state = state,
+                            onPickAdmin = vm::pickRoomAdmin,
+                            onToggle = vm::toggleRoomMember,
+                            onName = vm::setRoomName,
+                            onCreate = vm::createRoom,
+                            onCancel = vm::closeForm,
+                        )
+                    }
                     Screen.Chat -> {
                         BackHandler { vm.backToTeam() }
                         ChatScreen(

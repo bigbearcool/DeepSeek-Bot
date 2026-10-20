@@ -64,3 +64,26 @@ fun DsTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Un
         MaterialTheme(colorScheme = scheme, content = content)
     }
 }
+
+/** ds-bot ink colors (src/client/inks.js): light value, dark value. */
+private val INKS = mapOf(
+    "deepseek" to (0xFF4D6BFE to 0xFF6A84FF), "charcoal" to (0xFF141416 to 0xFFF1F2F4), "graphite" to (0xFF2D2D2D to 0xFFD6D6DA),
+    "rose" to (0xFFEC2F6B to 0xFFFF5A7A), "sky" to (0xFF0AA8D6 to 0xFF2EE6E0), "tangerine" to (0xFFFF6900 to 0xFFFF8A2E),
+    "cobalt" to (0xFF082DFF to 0xFF5C78FF), "black" to (0xFF000000 to 0xFFFFFFFF), "brown" to (0xFFA27952 to 0xFF855C36),
+    "red" to (0xFFFF3E51 to 0xFFE02135), "orange" to (0xFFFF781C to 0xFFFF6700), "yellow" to (0xFFFFAF38 to 0xFFFF9800),
+    "green" to (0xFF00C972 to 0xFF009957), "cyan" to (0xFF1CC3B0 to 0xFF00A592), "blue" to (0xFF2A92FE to 0xFF0E74E0),
+    "violet" to (0xFFA97EFE to 0xFF804EE0), "magenta" to (0xFFFF5EB1 to 0xFFE02A88), "gray" to (0xFF959595 to 0xFF777777),
+    "aurora" to (0xFF00B8D4 to 0xFF2EE6E0),
+)
+private val LEGACY = mapOf("kimi" to "charcoal", "zai" to "graphite", "minimax" to "rose", "stepfun" to "sky", "mimo" to "tangerine", "qwen" to "cobalt")
+
+/** Pure: a ds-bot color id or #rrggbb as ARGB, or null when unknown. */
+fun inkArgb(color: String?, dark: Boolean = false): Long? {
+    if (color.isNullOrBlank()) return null
+    if (Regex("^#[0-9a-fA-F]{6}$").matches(color)) return 0xFF000000L or color.substring(1).toLong(16)
+    val pair = INKS[color] ?: INKS[LEGACY[color]] ?: return null
+    return if (dark) pair.second else pair.first
+}
+
+@androidx.compose.runtime.Composable
+fun inkColor(color: String?): Color? = inkArgb(color, LocalDs.current.dark)?.let { Color(it) }

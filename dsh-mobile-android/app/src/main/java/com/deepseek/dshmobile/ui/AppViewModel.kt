@@ -7,6 +7,16 @@ import com.deepseek.dshmobile.BuildConfig
 import com.deepseek.dshmobile.data.AuthRepository
 import com.deepseek.dshmobile.data.AuthRevokedError
 import com.deepseek.dshmobile.data.BotInfo
+import com.deepseek.dshmobile.data.BotOptions
+import com.deepseek.dshmobile.data.BotRules
+import com.deepseek.dshmobile.data.EffortOption
+import com.deepseek.dshmobile.data.FolderListing
+import com.deepseek.dshmobile.data.LiveReply
+import com.deepseek.dshmobile.data.NewBotDraft
+import com.deepseek.dshmobile.data.NewRoomDraft
+import com.deepseek.dshmobile.data.RoomInfo
+import com.deepseek.dshmobile.data.RoomRules
+import com.deepseek.dshmobile.data.RoomStreams
 import com.deepseek.dshmobile.data.BridgeApi
 import com.deepseek.dshmobile.data.BridgeError
 import com.deepseek.dshmobile.data.ChatItem
@@ -34,7 +44,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.UUID
 
-enum class Screen { Loading, Pair, Team, Chat }
+enum class Screen { Loading, Pair, Team, Chat, NewBot, NewRoom }
+
+const val ROOM_KEY_PREFIX = "room:"
 
 data class UiState(
     val screen: Screen = Screen.Loading,
@@ -56,7 +68,24 @@ data class UiState(
     val sending: Boolean = false,
     val composeText: String = "",
     val pairInput: String = "",
-)
+    // ---- group chats ----
+    val rooms: List<RoomInfo> = emptyList(),
+    val selectedRoom: RoomInfo? = null,
+    /** Members writing right now in the open group chat. */
+    val live: List<LiveReply> = emptyList(),
+    // ---- new Bot / new group chat forms ----
+    val options: BotOptions? = null,
+    val optionsLoading: Boolean = false,
+    val botDraft: NewBotDraft = NewBotDraft(),
+    val efforts: List<EffortOption> = emptyList(),
+    val roomDraft: NewRoomDraft = NewRoomDraft(),
+    val folderListing: FolderListing? = null,
+    val creating: Boolean = false,
+    val formError: String? = null,
+) {
+    val inRoom: Boolean get() = selectedRoom != null
+    val chatTitle: String get() = selectedRoom?.name ?: selectedBot?.name.orEmpty()
+}
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val auth: AuthRepository = app.dsh.authRepository
@@ -80,8 +109,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 StartRoute.Chat -> {
                     // Open the last chat right away from cache-less placeholder; team fills in later.
-                    val placeholder = BotInfo(snap.lastBotId, snap.lastBotId, null, null, null, false)
-                    openBot(placeholder)
+                    val last = snap.lastBotId.orEmpty()
+                    if (last.startsWith(ROOM_KEY_PREFIX)) {
+                        val id = last.removePrefix(ROOM_KEY_PREFIX)
+                        openRoom(RoomInfo(id, ""))
+                    } else {
+                        openBot(BotInfo(last, last, null, null, null, false))
+                    }
                     loadTeam(refreshSelected = true)
                 }
             }
@@ -96,7 +130,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun friendly(e: Throwable): String = when (e) {
         is AuthRevokedError -> "此设备的配对已失效，请在电脑上重新获取配对码"
-        is BridgeError -> when (e.status) {
+        is BridgeError -> if (e.zh != null) e.zh else when (e.status) {
             400 -> "配对码无效或已过期，请在电脑上刷新后重试"
             404 -> "找不到这个助手，可能已被删除"
             429 -> "尝试次数过多，请稍后再试"
@@ -170,9 +204,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .onSuccess { team ->
                 _state.update { st ->
                     val sel = st.selectedBot?.let { cur -> team.bots.find { it.id == cur.id } ?: cur }
+                    val room = st.selectedRoom?.let { cur -> team.rooms.find { it.id == cur.id } ?: cur }
                     st.copy(
                         busy = false,
                         bots = team.bots,
+                        rooms = team.rooms,
+                        selectedRoom = room,
                         teamLoaded = true,
                         selectedBot = if (refreshSelected || st.selectedBot != null) sel else st.selectedBot,
                         notice = if (!team.available) "电脑端的助手暂时不可用" else st.notice,
@@ -188,6 +225,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             it.copy(
                 screen = Screen.Chat,
                 selectedBot = bot,
+                selectedRoom = null,
+                live = emptyList(),
                 messages = emptyList(),
                 nextCursor = null,
                 wait = WaitState(),
@@ -202,7 +241,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun backToTeam() {
         stopStream()
         viewModelScope.launch { store.setLastBotId(null) }
-        _state.update { it.copy(screen = Screen.Team, selectedBot = null, messages = emptyList(), wait = WaitState()) }
+        _state.update {
+            it.copy(screen = Screen.Team, selectedBot = null, selectedRoom = null, live = emptyList(), messages = emptyList(), wait = WaitState(), formError = null)
+        }
         if (!_state.value.teamLoaded) loadTeam()
     }
 
@@ -212,6 +253,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun loadHistory(reset: Boolean) {
+        _state.value.selectedRoom?.let { loadRoomHistory(it.id); return }
         val bot = _state.value.selectedBot ?: return
         val cursor = if (reset) null else _state.value.nextCursor
         _state.update { it.copy(busy = true) }
@@ -228,7 +270,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- send ----
     fun sendMessage() {
-        val st = _state.value
+        val st0 = _state.value
+        if (st0.selectedRoom != null) { sendRoomMessage(); return }
+        val st = st0
         val bot = st.selectedBot ?: return
         val text = st.composeText.trim()
         if (text.isEmpty() || st.sending) return // guard double tap / IME + button
@@ -269,7 +313,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissWait() = _state.update { it.copy(wait = WaitMachine.reduce(it.wait, WaitEvent.Dismiss)) }
 
     // ---- live stream with auto-reconnect ----
-    private fun startStream(botId: String) {
+    private fun startStream(botId: String?, roomId: String? = null) {
         streamJob?.cancel()
         streamJob = viewModelScope.launch {
             var attempt = 0
@@ -280,7 +324,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     val token = auth.refreshAccess(force = forceRefresh)
                     forceRefresh = false
                     val url = BridgeApi(BridgeApi.restClient()).withBase(auth.effectiveBaseUrl())
-                        .streamUrl(botId = botId, test = false)
+                        .streamUrl(botId = botId, test = false, roomId = roomId)
                     sse.connect(url, token).collect { ev ->
                         if (ev.event == "hello") {
                             gotHello = true
@@ -312,6 +356,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun handleSse(ev: SseEvent) {
+        if (_state.value.selectedRoom != null) { handleRoomSse(ev); return }
         when (ev.event) {
             "message" -> {
                 val itemJson = ev.json().optJSONObject("item") ?: return
@@ -340,6 +385,202 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+    }
+
+    // ---- group chats ----
+    fun openRoom(room: RoomInfo) = viewModelScope.launch {
+        stopStream()
+        _state.update {
+            it.copy(
+                screen = Screen.Chat, selectedRoom = room, selectedBot = null, live = emptyList(),
+                messages = emptyList(), nextCursor = null, wait = WaitState(), notice = null,
+            )
+        }
+        store.setLastBotId(ROOM_KEY_PREFIX + room.id)
+        loadRoomHistory(room.id)
+        startStream(botId = null, roomId = room.id)
+    }
+
+    private suspend fun loadRoomHistory(roomId: String) {
+        _state.update { it.copy(busy = true) }
+        runCatching { auth.withAccess { token, api -> api.roomHistory(token, roomId) } }
+            .onSuccess { page ->
+                _state.update { st ->
+                    if (st.selectedRoom?.id != roomId) return@update st
+                    st.copy(busy = false, messages = ChatMerge.mergeHistory(st.messages, page.items), nextCursor = null)
+                }
+            }
+            .onFailure { onFailure(it) }
+    }
+
+    private fun sendRoomMessage() {
+        val st = _state.value
+        val room = st.selectedRoom ?: return
+        val text = st.composeText.trim()
+        if (text.isEmpty() || st.sending) return
+        val clientId = "m-" + UUID.randomUUID().toString()
+        _state.update {
+            it.copy(
+                composeText = "", sending = true, notice = null,
+                messages = it.messages + ChatItem(kind = "user", text = text, time = System.currentTimeMillis(), clientMessageId = clientId, local = true),
+                wait = WaitMachine.reduce(it.wait, WaitEvent.Submitted(clientId)),
+            )
+        }
+        viewModelScope.launch {
+            runCatching { auth.withAccess { token, api -> api.roomSend(token, room.id, text, clientId) } }
+                .onSuccess { _state.update { it.copy(sending = false) } }
+                .onFailure { e ->
+                    if (e is CancellationException) throw e
+                    if (LaunchRouter.requiresRepair(e)) { onFailure(e); return@onFailure }
+                    _state.update { it.copy(sending = false, wait = WaitMachine.reduce(it.wait, WaitEvent.SendFailed("发送失败：" + friendly(e)))) }
+                }
+        }
+    }
+
+    private fun handleRoomSse(ev: SseEvent) {
+        val data = ev.json()
+        val now = System.currentTimeMillis()
+        when (ev.event) {
+            "message" -> {
+                val item = parseChatItem(data.optJSONObject("item") ?: return)
+                _state.update { st ->
+                    val wait = if (item.kind == "member") WaitMachine.reduce(st.wait, WaitEvent.Dismiss) else st.wait
+                    st.copy(
+                        messages = ChatMerge.mergeIncoming(st.messages, item),
+                        live = RoomStreams.prune(RoomStreams.onMessage(st.live, item), now),
+                        wait = wait,
+                    )
+                }
+            }
+            "stream" -> {
+                val attempt = data.optString("attemptId").ifBlank { return }
+                val botId = data.optString("botId").ifBlank { null }
+                val name = data.optString("name").ifBlank { null }
+                _state.update { st ->
+                    val live = when (data.optString("phase")) {
+                        "start" -> RoomStreams.start(st.live, attempt, botId, name)
+                        "end" -> RoomStreams.end(st.live, attempt, now)
+                        else -> data.optString("text").let { d -> if (d.isEmpty()) st.live else RoomStreams.delta(st.live, attempt, d, botId, name) }
+                    }
+                    val anyShown = live.any { RoomStreams.shown(it) != null }
+                    st.copy(
+                        live = RoomStreams.prune(live, now),
+                        wait = if (anyShown && st.wait.phase == WaitPhase.Waiting) WaitMachine.reduce(st.wait, WaitEvent.Dismiss) else st.wait,
+                    )
+                }
+            }
+        }
+    }
+
+    // ---- new Bot ----
+    fun openNewBot() {
+        _state.update { it.copy(screen = Screen.NewBot, botDraft = NewBotDraft(), efforts = emptyList(), formError = null, creating = false, folderListing = null) }
+        loadOptions { opts ->
+            val shapes = opts.shapes.map { it.id }.filter { it != "whale" }.ifEmpty { listOf("gumdrop") }
+            val colors = opts.colors.map { it.id }.filter { it !in listOf("black", "gray", "brown", "charcoal", "graphite") }.ifEmpty { listOf("blue") }
+            val model = BotRules.startModel(opts)
+            _state.update { it.copy(botDraft = it.botDraft.copy(shape = shapes.random(), color = colors.random(), model = model)) }
+            if (model.isNotBlank()) loadEfforts(model)
+        }
+    }
+
+    private fun loadOptions(then: (BotOptions) -> Unit = {}) = viewModelScope.launch {
+        _state.update { it.copy(optionsLoading = true) }
+        runCatching { auth.withAccess { token, api -> api.botOptions(token) } }
+            .onSuccess { opts -> _state.update { it.copy(options = opts, optionsLoading = false) }; then(opts) }
+            .onFailure { e ->
+                if (e is CancellationException) throw e
+                if (LaunchRouter.requiresRepair(e)) { onFailure(e); return@onFailure }
+                _state.update { it.copy(optionsLoading = false, formError = friendly(e)) }
+            }
+    }
+
+    fun updateBotDraft(change: (NewBotDraft) -> NewBotDraft) {
+        val before = _state.value.botDraft
+        val after = change(before)
+        _state.update { it.copy(botDraft = after, formError = null) }
+        if (after.model != before.model) {
+            _state.update { it.copy(efforts = emptyList(), botDraft = it.botDraft.copy(effort = "")) }
+            if (after.model.isNotBlank()) loadEfforts(after.model)
+        }
+    }
+
+    private fun loadEfforts(ref: String) = viewModelScope.launch {
+        runCatching { auth.withAccess { token, api -> api.efforts(token, ref) } }
+            .onSuccess { list -> _state.update { if (it.botDraft.model == ref) it.copy(efforts = list) else it } }
+    }
+
+    fun browseFolder(path: String) = viewModelScope.launch {
+        runCatching { auth.withAccess { token, api -> api.listFolder(token, path) } }
+            .onSuccess { listing -> _state.update { it.copy(folderListing = listing) } }
+            .onFailure { e -> if (e is CancellationException) throw e; _state.update { it.copy(formError = friendly(e)) } }
+    }
+
+    fun closeFolderBrowser() = _state.update { it.copy(folderListing = null) }
+
+    fun setAvatarImage(dataUrl: String?) = updateBotDraft { it.copy(image = dataUrl) }
+
+    fun showFormError(message: String) = _state.update { it.copy(formError = message) }
+
+    fun createBot() {
+        val st = _state.value
+        if (st.creating) return
+        val taken = st.bots.map { it.name }
+        val draft = st.botDraft.let { d -> if (d.name.isBlank()) d.copy(name = BotRules.freshName(taken)) else d.copy(name = d.name.trim()) }
+        BotRules.problem(draft.name, taken)?.let { p -> _state.update { it.copy(formError = p) }; return }
+        _state.update { it.copy(creating = true, formError = null) }
+        viewModelScope.launch {
+            runCatching { auth.withAccess { token, api -> api.createBot(token, draft) } }
+                .onSuccess { bot ->
+                    _state.update { it.copy(creating = false, bots = it.bots + bot) }
+                    openBot(bot)
+                    loadTeam(refreshSelected = true)
+                }
+                .onFailure { e ->
+                    if (e is CancellationException) throw e
+                    if (LaunchRouter.requiresRepair(e)) { onFailure(e); return@onFailure }
+                    _state.update { it.copy(creating = false, formError = friendly(e)) }
+                }
+        }
+    }
+
+    // ---- new group chat ----
+    fun openNewRoom() {
+        _state.update { it.copy(screen = Screen.NewRoom, roomDraft = NewRoomDraft(), formError = null, creating = false) }
+        if (!_state.value.teamLoaded) loadTeam()
+        if (_state.value.options == null) loadOptions()
+    }
+
+    fun pickRoomAdmin(id: String) = _state.update { it.copy(roomDraft = RoomRules.pickAdmin(it.roomDraft, id), formError = null) }
+    fun toggleRoomMember(id: String) = _state.update { it.copy(roomDraft = RoomRules.toggle(it.roomDraft, id), formError = null) }
+    fun setRoomName(v: String) = _state.update { it.copy(roomDraft = it.roomDraft.copy(name = v)) }
+
+    fun createRoom() {
+        val st = _state.value
+        val max = st.options?.roomMaxMembers ?: 12
+        if (st.creating) return
+        if (!RoomRules.canCreate(st.roomDraft, max)) {
+            _state.update { it.copy(formError = if (st.roomDraft.members.size + 1 > max) "一个群聊最多 $max 个助手" else "请先选管理员，再至少选一位成员") }
+            return
+        }
+        _state.update { it.copy(creating = true, formError = null) }
+        viewModelScope.launch {
+            runCatching { auth.withAccess { token, api -> api.createRoom(token, st.roomDraft) } }
+                .onSuccess { room ->
+                    _state.update { it.copy(creating = false, rooms = it.rooms + room) }
+                    openRoom(room)
+                    loadTeam(refreshSelected = true)
+                }
+                .onFailure { e ->
+                    if (e is CancellationException) throw e
+                    if (LaunchRouter.requiresRepair(e)) { onFailure(e); return@onFailure }
+                    _state.update { it.copy(creating = false, formError = friendly(e)) }
+                }
+        }
+    }
+
+    fun closeForm() {
+        _state.update { it.copy(screen = Screen.Team, formError = null, creating = false, folderListing = null) }
     }
 
     private fun stopStream() {

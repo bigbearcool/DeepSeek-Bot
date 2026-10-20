@@ -61,6 +61,7 @@ class BridgeApi(
             return TeamResponse(
                 available = json.optBoolean("available", true),
                 bots = bots,
+                rooms = json.optJSONArray("rooms")?.mapObjects()?.map(::parseRoom).orEmpty(),
                 mainBotIds = mains,
                 revision = json.optLongOrNull("revision"),
                 reason = json.optStringOrNull("reason"),
@@ -109,10 +110,47 @@ class BridgeApi(
             )
         }
 
-        fun streamUrl(botId: String? = null, test: Boolean = false): String {
+        suspend fun roomHistory(accessToken: String, roomId: String): RoomHistoryResponse {
+            val json = getJson("/rooms/history?roomId=" + enc(roomId), accessToken)
+            return RoomHistoryResponse(roomId, json.optJSONArray("items")?.mapObjects()?.map(::parseChatItem).orEmpty())
+        }
+
+        suspend fun roomSend(accessToken: String, roomId: String, text: String, clientMessageId: String? = null): SendResponse {
+            val body = JSONObject().put("roomId", roomId).put("text", text)
+            if (clientMessageId != null) body.put("clientMessageId", clientMessageId)
+            val json = postJson("/rooms/send", body, accessToken)
+            return SendResponse(ok = json.optBoolean("ok", true), botId = null, sessionId = roomId, stub = false, reason = null,
+                duplicate = json.optBoolean("duplicate", false))
+        }
+
+        suspend fun botOptions(accessToken: String): BotOptions = parseBotOptions(getJson("/bots/options", accessToken))
+
+        suspend fun efforts(accessToken: String, ref: String): List<EffortOption> =
+            getJson("/bots/efforts?ref=" + enc(ref), accessToken).optJSONArray("efforts")?.mapObjects()
+                ?.map { EffortOption(it.optString("id"), it.optString("name", it.optString("id"))) }.orEmpty()
+
+        suspend fun listFolder(accessToken: String, path: String): FolderListing {
+            val json = getJson("/folders?path=" + enc(path), accessToken)
+            val entries = json.optJSONArray("entries")?.mapObjects()?.mapNotNull { e ->
+                val p = e.optStringOrNull("path") ?: return@mapNotNull null
+                FolderOption(p, e.optString("name", p))
+            }.orEmpty()
+            return FolderListing(json.optString("path", path), entries)
+        }
+
+        suspend fun createBot(accessToken: String, draft: NewBotDraft): BotInfo =
+            parseBot(postJson("/bots/create", draft.toJson(), accessToken).getJSONObject("bot"))
+
+        suspend fun createRoom(accessToken: String, draft: NewRoomDraft): RoomInfo =
+            parseRoom(postJson("/rooms/create", draft.toJson(), accessToken).getJSONObject("room"))
+
+        private fun enc(v: String) = java.net.URLEncoder.encode(v, "UTF-8")
+
+        fun streamUrl(botId: String? = null, test: Boolean = false, roomId: String? = null): String {
             val b = StringBuilder(baseUrl).append("/stream")
             val params = mutableListOf<String>()
-            if (!botId.isNullOrBlank()) params += "botId=" + java.net.URLEncoder.encode(botId, "UTF-8")
+            if (!roomId.isNullOrBlank()) params += "roomId=" + java.net.URLEncoder.encode(roomId, "UTF-8")
+            else if (!botId.isNullOrBlank()) params += "botId=" + java.net.URLEncoder.encode(botId, "UTF-8")
             if (test) params += "mode=test"
             if (params.isNotEmpty()) b.append('?').append(params.joinToString("&"))
             return b.toString()
@@ -136,6 +174,7 @@ class BridgeApi(
                     json.optJSONObject("error")?.optString("message")
                         ?: json.optString("message", "HTTP $code"),
                     code,
+                    json.optJSONObject("error")?.optStringOrNull("zh"),
                 )
             }
             return json
@@ -166,13 +205,14 @@ class BridgeApi(
         }
 
         private fun parseError(code: Int, text: String): BridgeError {
+            val zh = try { JSONObject(text).optJSONObject("error")?.optStringOrNull("zh") } catch (_: Exception) { null }
             val msg = try {
                 JSONObject(text).optJSONObject("error")?.optString("message")
                     ?: JSONObject(text).optString("message").takeIf { it.isNotBlank() }
             } catch (_: Exception) {
                 null
             }
-            return BridgeError(msg ?: "HTTP $code", code)
+            return BridgeError(msg ?: "HTTP $code", code, zh)
         }
     }
 

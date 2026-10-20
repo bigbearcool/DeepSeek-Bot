@@ -1,6 +1,6 @@
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { picker, fileIo as fs, fileUri } from '@kit.CoreFileKit';
-import { common } from '@kit.AbilityKit';
+import { common, Want, wantConstant } from '@kit.AbilityKit';
 
 export class PickedFile {
   uri: string = '';
@@ -76,5 +76,72 @@ export class Files {
       fs.closeSync(f);
     }
     return fileUri.getUriFromPath(path);
+  }
+
+  private static copyTo(srcUri: string, destUri: string): void {
+    const src = fs.openSync(srcUri, fs.OpenMode.READ_ONLY);
+    const dst = fs.openSync(destUri, fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+    try {
+      const buf = new ArrayBuffer(64 * 1024);
+      let n = fs.readSync(src.fd, buf);
+      while (n > 0) {
+        fs.writeSync(dst.fd, buf.slice(0, n));
+        n = fs.readSync(src.fd, buf);
+      }
+    } finally {
+      fs.closeSync(src);
+      fs.closeSync(dst);
+    }
+  }
+
+  /** Lets the person choose where to keep the file; false when they backed out. */
+  static async saveAs(ctx: common.Context, srcUri: string, name: string): Promise<boolean> {
+    const p = new picker.DocumentViewPicker(ctx);
+    const opt = new picker.DocumentSaveOptions();
+    opt.newFileNames = [name];
+    const out = await p.save(opt);
+    if (out.length === 0) {
+      return false;
+    }
+    Files.copyTo(srcUri, out[0]);
+    return true;
+  }
+
+  /** Puts a picture into the phone's gallery after the system asks the person. */
+  static async saveToGallery(ctx: common.Context, srcUri: string, name: string): Promise<boolean> {
+    const helper = photoAccessHelper.getPhotoAccessHelper(ctx);
+    const dot = name.lastIndexOf('.');
+    const ext = dot > 0 ? name.substring(dot + 1).toLowerCase() : 'jpg';
+    const cfg: photoAccessHelper.PhotoCreationConfig = {
+      title: dot > 0 ? name.substring(0, dot) : name,
+      fileNameExtension: ext,
+      photoType: photoAccessHelper.PhotoType.IMAGE
+    };
+    const uris = await helper.showAssetsCreationDialog([srcUri], [cfg]);
+    if (uris.length === 0) {
+      return false;
+    }
+    Files.copyTo(srcUri, uris[0]);
+    return true;
+  }
+
+  /** Opens the file in another app on the phone, with its real name so the right app is offered. */
+  static async open(ctx: common.UIAbilityContext, srcUri: string, name: string): Promise<void> {
+    const dir = ctx.cacheDir + '/open';
+    if (!fs.accessSync(dir)) {
+      fs.mkdirSync(dir);
+    }
+    const safe = name.replace(new RegExp('[/\\\\:*?"<>|]', 'g'), '_');
+    const path = dir + '/' + (safe.length > 0 ? safe : 'file');
+    const f = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+    fs.closeSync(f);
+    const uri = fileUri.getUriFromPath(path);
+    Files.copyTo(srcUri, uri);
+    const want: Want = {
+      action: 'ohos.want.action.viewData',
+      uri: uri,
+      flags: wantConstant.Flags.FLAG_AUTH_READ_URI_PERMISSION
+    };
+    await ctx.startAbility(want);
   }
 }

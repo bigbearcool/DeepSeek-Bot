@@ -2,6 +2,8 @@ import { describe, it, expect } from '@ohos/hypium';
 import { Exchanges, ListPrefs, Looks } from '../main/ets/common/Look';
 import { CHARACTERS } from '../main/ets/common/Characters';
 import { ChatEntry, ChatItem, newItem } from '../main/ets/common/Models';
+import { LaunchRouter, StartRoute } from '../main/ets/common/ChatLogic';
+import { AuthRevokedError, BridgeError, friendly } from '../main/ets/common/Errors';
 
 function c(id: string, lastAt: number): ChatEntry {
   const e: ChatEntry = { kind: 'bot', id: id, name: id, color: null, main: false, preview: '', lastAt: lastAt, unread: 0, running: false, members: [] };
@@ -110,6 +112,33 @@ export default function batch5Test() {
       expect(q.theme).assertEqual('dark');
       expect(ListPrefs.decode('').theme).assertEqual('system');
       expect(ListPrefs.normTheme('blue')).assertEqual('system');
+    });
+  });
+
+  describe('launchResume', () => {
+    it('notPairedGoesToPairing', 0, () => {
+      expect(LaunchRouter.route(true, false, 'bot:chief')).assertEqual(StartRoute.Pair);
+      expect(LaunchRouter.requiresRepair(new AuthRevokedError('x'))).assertTrue();
+    });
+    it('resumeOnlyExistingChat', 0, () => {
+      const bots = ['chief', 'writer'];
+      const rooms = ['r1'];
+      expect(LaunchRouter.resumeKey('bot:writer', bots, rooms)).assertEqual('bot:writer');
+      expect(LaunchRouter.resumeKey('room:r1', bots, rooms)).assertEqual('room:r1');
+      expect(LaunchRouter.resumeKey('bot:gone', bots, rooms)).assertEqual('');
+      expect(LaunchRouter.resumeKey('room:gone', bots, rooms)).assertEqual('');
+      expect(LaunchRouter.resumeKey('bot:', bots, rooms)).assertEqual('');
+      expect(LaunchRouter.resumeKey('chief', bots, rooms)).assertEqual('');
+      expect(LaunchRouter.resumeKey('', bots, rooms)).assertEqual('');
+      expect(LaunchRouter.resumeKey('team:chief', bots, rooms)).assertEqual('');
+    });
+    it('goneChatBackToList', 0, () => {
+      expect(LaunchRouter.chatGone(new BridgeError('unknown group chat', 404))).assertTrue();
+      expect(LaunchRouter.chatGone(new BridgeError('botId required', 400))).assertTrue();
+      expect(LaunchRouter.chatGone(new BridgeError('boom', 500))).assertFalse();
+      expect(LaunchRouter.chatGone(new BridgeError('network', 0))).assertFalse();
+      expect(LaunchRouter.chatGone(new AuthRevokedError('x'))).assertFalse();
+      expect(friendly(new BridgeError('x', 403))).assertEqual('电脑没有接受这个操作');
     });
   });
 }

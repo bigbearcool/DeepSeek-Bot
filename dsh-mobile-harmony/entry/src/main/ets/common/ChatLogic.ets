@@ -1,5 +1,5 @@
 import { ChatItem, ChatEntry, ApprovalInfo, copyItem, newItem } from './Models';
-import { AuthRevokedError } from './Errors';
+import { AuthRevokedError, BridgeError } from './Errors';
 
 function norm(t: string | null): string {
   return (t ?? '').trim();
@@ -145,6 +145,31 @@ export class LaunchRouter {
       return StartRoute.Pair;
     }
     return lastId.length > 0 ? StartRoute.Chat : StartRoute.Team;
+  }
+
+  /** The last chat to reopen, or '' when it is empty, malformed or no longer on the computer. */
+  static resumeKey(lastChat: string, botIds: string[], roomIds: string[]): string {
+    const i = lastChat.indexOf(':');
+    if (i <= 0) {
+      return '';
+    }
+    const kind = lastChat.substring(0, i);
+    const id = lastChat.substring(i + 1).trim();
+    if (id.length === 0) {
+      return '';
+    }
+    if (kind === 'bot') {
+      return botIds.indexOf(id) >= 0 ? 'bot:' + id : '';
+    }
+    if (kind === 'room') {
+      return roomIds.indexOf(id) >= 0 ? 'room:' + id : '';
+    }
+    return '';
+  }
+
+  /** The chat being opened is gone from the computer (or was never valid): go back to the list. */
+  static chatGone(e: Object): boolean {
+    return e instanceof BridgeError && ((e as BridgeError).status === 404 || (e as BridgeError).status === 400);
   }
 
   /** Only a revoked pass sends the user back to pairing; being offline never does. */

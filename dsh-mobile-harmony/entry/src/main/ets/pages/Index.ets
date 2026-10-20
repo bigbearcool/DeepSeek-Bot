@@ -157,10 +157,19 @@ struct Index {
       return;
     }
     if (r === StartRoute.Chat) {
-      const k = s.lastChat;
+      // Wait for the list so a chat removed on the computer is never opened.
+      await this.refreshList();
+      if (this.screen !== 'list' || this.offline) {
+        return;
+      }
+      const k = LaunchRouter.resumeKey(s.lastChat, this.bots.map((b: BotInfo) => b.id),
+        this.rooms.map((x: RoomInfo) => x.id));
+      if (k.length === 0) {
+        this.store?.setLastChat('');
+        return;
+      }
       const kind = k.startsWith('room:') ? 'room' : 'bot';
-      const id = k.substring(k.indexOf(':') + 1);
-      this.openChat(kind, id, '');
+      this.openChat(kind, k.substring(k.indexOf(':') + 1), '');
     }
   }
 
@@ -481,6 +490,11 @@ struct Index {
       }
       this.scrollEnd();
     } catch (e) {
+      if (LaunchRouter.chatGone(e as Object) && this.openId === id && this.screen === 'chat') {
+        this.closeChat();
+        this.toast('这个会话在电脑上已经不存在了');
+        return;
+      }
       this.fail(e as Object);
     }
   }

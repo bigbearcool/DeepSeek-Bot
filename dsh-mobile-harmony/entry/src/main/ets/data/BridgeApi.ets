@@ -1,3 +1,4 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { http } from '@kit.NetworkKit';
 import { J, JObj } from '../common/Json';
 import { BridgeError } from '../common/Errors';
@@ -67,6 +68,11 @@ export class BridgeApi {
       const resp = await req.request(this.baseUrl + path, opts);
       const text = typeof resp.result === 'string' ? resp.result as string : '';
       const r: RawResp = { code: resp.responseCode, text: text };
+      if (r.code >= 400) {
+        // Path without query and the server's reason; never the token.
+        hilog.warn(0x0d50, 'dshBridge', '%{public}s %{public}s -> %{public}d %{public}s', method, path.split('?')[0],
+          r.code, text.substring(0, 200));
+      }
       return r;
     } catch (e) {
       throw new BridgeError('network', 0);

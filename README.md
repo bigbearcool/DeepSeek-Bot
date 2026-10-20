@@ -11,6 +11,58 @@ English | [中文](README.zh.md)
 
 > **这是 [Fei2411/DeepSeek-Bot](https://github.com/Fei2411/DeepSeek-Bot) 的 fork。** 上游：https://github.com/Fei2411/DeepSeek-Bot 。下面三节只说明本 fork 和上游的关系；从「Install」开始是上游原文。
 
+## 这个仓库是做什么的
+
+这是在上游 DeepSeek-Bot 基础上改的版本，让你在 DeepSeek Harness（DSH）里养一群 Bot，并且能用手机和它们聊天。仓库里主要有这几块：
+
+- **`ds-bot/`**（当前 0.1.9）：DS Bot 插件本体。在 DSH 里创建 Bot、和 Bot 单聊、拉 Bot 进群聊。本 fork 在上游基础上加了「每个 Bot 单独指定 Agent 预设」等改动。
+- **`dsh-mobile-bridge/`**（当前 0.0.19）：DSH 插件，给手机开一个专用接口，负责配对和收发消息。
+- **`dsh-mobile-android/`**（当前 0.2.4）：Android 手机 App。
+- **`app/`、`docker/`**：上游自带的桌面应用和 Docker 镜像，用法见下面的英文原文。
+
+## 怎么装
+
+**1. 先装 DSH 和 DS Bot**：按下面「Install」一节装好 DSH，配好至少一个模型，再装 `ds-bot`。想用本 fork 的 ds-bot，在仓库里打包：
+
+```sh
+cd ds-bot
+npm pack            # 生成 ds-bot-0.1.9.tgz
+```
+
+在 DSH 的插件页里「添加插件」时填这个 tgz 的完整路径，或者用命令行 `dsh plugin add <tgz 路径>`，启用后重启 DSH。
+
+**2. 装手机桥接插件**：
+
+```sh
+cd dsh-mobile-bridge
+npm pack            # 生成 dsh-mobile-bridge-0.0.19.tgz
+dsh plugin add <dsh-mobile-bridge-0.0.19.tgz 的路径>
+```
+
+启用后重启 DSH。插件会另外监听 **3081 端口**给手机用。手机不在同一个局域网时，要用你自己的反向代理把例如 `https://example.com:8443` 转到这台机器的 3081。
+
+**3. 打手机 App**：需要 JDK 21 和 Android SDK。
+
+```sh
+cd dsh-mobile-android
+./gradlew assembleDebug
+```
+
+装包在 `app/build/outputs/apk/debug/app-debug.apk`，传到 Android 手机上装好。
+
+**4. 配对**：在 DSH 网页左侧栏底部点「**手机配对**」，会弹出一个 6 位配对码（约 5 分钟有效）和二维码。打开手机 App，扫码或输入配对码就连上了。要在外网用，先在配对面板的设置里填「公网访问地址」（例如 `https://example.com:8443`），二维码里会带上这个地址。
+
+## 装好后能做什么
+
+- 在电脑上建 Bot、给每个 Bot 选不同的预设和模型，拉几个 Bot 组群一起干活。
+- 用手机看所有 Bot 和群聊，看历史、发消息，回复会一个字一个字地出来，可以中途停止。
+- 群聊里输入 `@` 会弹出本群 Bot：不 @ 时所有 Bot 都回，@ 了谁就只有谁回。
+- 在手机上新建 Bot、发起群聊、给 Bot 换模型，换完马上生效。
+- 在手机上处理 Bot 发来的审批请求。
+- 发图片和文件给 Bot，也能把 Bot 发来的文件存到手机上。
+- 新消息和待审批会弹系统通知，可以总开关，也可以按会话单独关。
+- 会话可以置顶、隐藏，显示未读数；支持浅色和深色主题；断线后会自动重连并补回漏掉的消息。
+
 ## 与上游的差异
 
 以 `git log upstream/dev..feat/341-per-bot-agent-preset` 和实际 diff 为准，本 fork 独有的改动：

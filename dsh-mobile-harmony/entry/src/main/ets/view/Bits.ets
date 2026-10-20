@@ -1,3 +1,4 @@
+import { LiveTimers } from '../common/ChatLogic';
 import { Looks, FALLBACK_SHAPE } from '../common/Look';
 import { Markdown, MdBlock, MdSpan } from '../common/Markdown';
 
@@ -274,5 +275,72 @@ export struct ImageViewer {
     .height('100%')
     .backgroundColor(Color.Black)
     .onClick(() => this.onClose())
+  }
+}
+
+/** Three dots lighting one after another, like the Android version. */
+@Component
+export struct BreathingDots {
+  @State step: number = 0;
+  private timer: number = -1;
+
+  aboutToAppear(): void {
+    this.timer = setInterval(() => {
+      this.step = (this.step + 1) % 3;
+    }, LiveTimers.DOT_MS);
+  }
+
+  aboutToDisappear(): void {
+    if (this.timer >= 0) {
+      clearInterval(this.timer);
+    }
+  }
+
+  build() {
+    Row({ space: 3 }) {
+      ForEach([0, 1, 2], (i: number) => {
+        Circle().width(6).height(6).fill($r('app.color.accent'))
+          .opacity(LiveTimers.dotOn(this.step, i) ? 0.95 : 0.35)
+      }, (i: number) => '' + i)
+    }
+  }
+}
+
+/** 「X 正在工作」 that softly pulses, or dots + 「X 正在输入…」 in a group. */
+@Component
+export struct WorkingLine {
+  @Prop label: string = '';
+  @Prop inRoom: boolean = false;
+  @Prop botId: string = '';
+  @Prop shape: string = '';
+  @Prop color: string = '';
+  @State dim: boolean = false;
+  private timer: number = -1;
+
+  aboutToAppear(): void {
+    this.timer = setInterval(() => {
+      this.dim = !this.dim;
+    }, 900);
+  }
+
+  aboutToDisappear(): void {
+    if (this.timer >= 0) {
+      clearInterval(this.timer);
+    }
+  }
+
+  build() {
+    Row({ space: 8 }) {
+      if (this.inRoom) {
+        BreathingDots()
+      } else {
+        CharAvatar({ botId: this.botId, shape: this.shape, color: this.color, dim: 20 })
+        BreathingDots()
+      }
+      Text(this.label).fontSize(14).fontColor($r('app.color.sub'))
+        .opacity(this.inRoom ? 1 : (this.dim ? 0.45 : 1))
+        .animation({ duration: 900, curve: Curve.EaseInOut })
+    }
+    .padding({ top: 6, bottom: 6 })
   }
 }

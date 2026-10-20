@@ -15,7 +15,8 @@ import {
 import {
   ChatListLogic, ChatMerge, LaunchRouter, Look, StartRoute, WaitEvent, WaitKind, WaitMachine, WaitPhase, WaitState
 } from '../common/ChatLogic';
-import { AttImage, CharAvatar, ImageViewer, MdText, RoomAvatar } from '../view/Bits';
+import { AttImage, BreathingDots, CharAvatar, ImageViewer, MdText, RoomAvatar, WorkingLine } from '../view/Bits';
+import { LiveTimers } from '../common/ChatLogic';
 import { roomTitle } from '../common/Look';
 import { COLOR_LABELS, Exchanges, ExRun, ListPrefs, Looks, PICKER_COLORS, SHAPE_LABELS } from '../common/Look';
 import { FolderListing, FolderOption, NamedOption } from '../common/Models';
@@ -79,7 +80,10 @@ struct Index {
   @State searchQ: string = '';
   @State searchHits: SearchHit[] = [];
   @State formError: string = '';
-  @StorageLink('foreground') foreground: boolean = true;
+  @StorageLink('foreground') @Watch('onForeground') foreground: boolean = true;
+  private lastEventAt: number = 0;
+  private lastPollAt: number = 0;
+  private stallTimer: number = -1;
   @StorageLink('openChat') @Watch('onOpenChat') openChatReq: string = '';
   @State prefs: ChatPrefs = new ChatPrefs();
   @State confirmRepair: boolean = false;
@@ -103,8 +107,45 @@ struct Index {
     this.start();
   }
 
+  onForeground(): void {
+    if (this.foreground && this.screen === 'chat' && this.auth !== null) {
+      // Back from the background: the old connection is likely gone.
+      this.sseAttempt = 0;
+      this.loadHistory();
+      this.openStream();
+    }
+  }
+
+  private workingNames(): string[] {
+    if (this.openKind === 'room') {
+      const typing = this.live.filter((x: LiveReply) => x.endedAt === 0 && RoomStreams.shown(x) === null);
+      return typing.map((x: LiveReply) => x.name ?? '');
+    }
+    return [this.openName];
+  }
+
+  private startStallCheck(): void {
+    if (this.stallTimer >= 0) {
+      return;
+    }
+    this.stallTimer = setInterval(() => {
+      if (this.screen !== 'chat') {
+        return;
+      }
+      const now = Date.now();
+      const waiting = this.wait.phase === WaitPhase.Waiting || this.wait.phase === WaitPhase.Streaming;
+      if (LiveTimers.shouldPoll(waiting, this.lastEventAt, this.lastPollAt, now)) {
+        this.lastPollAt = now;
+        this.loadHistory();
+      }
+    }, 3000);
+  }
+
   aboutToDisappear(): void {
     this.sse.close();
+    if (this.stallTimer >= 0) {
+      clearInterval(this.stallTimer);
+    }
     if (this.listTimer >= 0) {
       clearInterval(this.listTimer);
     }
@@ -499,6 +540,10 @@ struct Index {
           this.nextCursor = h.nextCursor ?? '';
         }
       }
+      if ((this.wait.phase === WaitPhase.Waiting || this.wait.phase === WaitPhase.Streaming) &&
+        this.openId === id && LiveTimers.replied(this.messages)) {
+        this.wait = WaitMachine.reduce(this.wait, new WaitEvent(WaitKind.StreamEnd));
+      }
       this.scrollEnd();
     } catch (e) {
       if (LaunchRouter.chatGone(e as Object) && this.openId === id && this.screen === 'chat') {
@@ -563,8 +608,11 @@ struct Index {
       const token = await this.auth.refresh(false);
       const api = this.auth.api();
       const url = kind === 'room' ? api.streamUrl('', id, RoomRound.since(this.messages)) : api.streamUrl(id, '', -1);
+      this.lastEventAt = Date.now();
+      this.startStallCheck();
       this.sse.open(url, token, (ev: SseEvent) => {
         this.sseAttempt = 0;
+        this.lastEventAt = Date.now();
         if (this.openKind === kind && this.openId === id) {
           this.onSse(ev);
         }
@@ -575,7 +623,7 @@ struct Index {
         if (code === 401 && this.auth !== null) {
           this.auth.refresh(true).catch((e: Object) => this.fail(e));
         }
-        const backoff = Math.min(30000, 1000 * Math.pow(2, Math.min(this.sseAttempt, 5)));
+        const backoff = LiveTimers.backoff(this.sseAttempt);
         this.sseAttempt++;
         setTimeout(() => {
           if (this.screen === 'chat' && this.openId === id) {
@@ -1509,7 +1557,12 @@ struct Index {
         ForEach(this.live.filter((x: LiveReply) => RoomStreams.shown(x) !== null), (x: LiveReply) => {
           ListItem() {
             Column({ space: 4 }) {
-              Text((x.name ?? '成员') + (x.endedAt > 0 ? '' : ' 正在回复…')).fontSize(12).fontColor($r('app.color.sub'))
+              Row({ space: 6 }) {
+                Text((x.name ?? '成员') + (x.endedAt > 0 ? '' : ' 正在回复')).fontSize(12).fontColor($r('app.color.sub'))
+                if (x.endedAt === 0) {
+                  BreathingDots()
+                }
+              }
               Column() {
                 MdText({ text: RoomStreams.shown(x) ?? '' })
               }
@@ -1530,10 +1583,14 @@ struct Index {
           }
         } else if (this.wait.phase === WaitPhase.Waiting || this.wait.phase === WaitPhase.Streaming) {
           ListItem() {
-            Row({ space: 8 }) {
-              LoadingProgress().width(20).height(20)
-              Text('正在想…').fontSize(14).fontColor($r('app.color.sub'))
-            }
+            WorkingLine({
+              label: Looks.workingLabel(this.workingNames(), this.openKind === 'room'), inRoom: this.openKind === 'room',
+              botId: this.openId, shape: this.botLook(this.openId)[0], color: this.botLook(this.openId)[1]
+            })
+          }
+        } else if (this.openKind === 'room' && this.workingNames().length > 0) {
+          ListItem() {
+            WorkingLine({ label: Looks.workingLabel(this.workingNames(), true), inRoom: true })
           }
         } else if (this.wait.phase === WaitPhase.Failed) {
           ListItem() {

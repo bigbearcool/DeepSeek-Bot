@@ -316,3 +316,38 @@ export class ChatListLogic {
     return a.getFullYear() + '/' + (a.getMonth() + 1) + '/' + a.getDate();
   }
 }
+
+/** Timing rules for the live connection and the waiting line (same numbers as Android). */
+export class LiveTimers {
+  static readonly STALL_MS: number = 10000;
+  static readonly DOT_MS: number = 400;
+
+  /** 1s, 2s, 4s … capped at 30s. */
+  static backoff(attempt: number): number {
+    return Math.min(30000, 1000 * Math.pow(2, Math.min(Math.max(attempt, 0), 5)));
+  }
+
+  /** Waiting with no live event for a while: fetch the history once more. */
+  static shouldPoll(waiting: boolean, lastEventAt: number, lastPollAt: number, now: number): boolean {
+    return waiting && now - lastEventAt >= LiveTimers.STALL_MS && now - lastPollAt >= LiveTimers.STALL_MS;
+  }
+
+  /** The reply already arrived after the user's last message, so stop waiting. */
+  static replied(items: ChatItem[]): boolean {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const k = items[i].kind;
+      if (k === 'bot' || k === 'member') {
+        return true;
+      }
+      if (k === 'user') {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  /** Which of the three dots is lit at this step. */
+  static dotOn(step: number, i: number): boolean {
+    return step % 3 === i;
+  }
+}

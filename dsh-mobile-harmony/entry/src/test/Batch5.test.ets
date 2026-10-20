@@ -2,7 +2,7 @@ import { describe, it, expect } from '@ohos/hypium';
 import { Exchanges, ListPrefs, Looks, roomTitle } from '../main/ets/common/Look';
 import { CHARACTERS } from '../main/ets/common/Characters';
 import { ChatEntry, ChatItem, newItem } from '../main/ets/common/Models';
-import { LaunchRouter, StartRoute } from '../main/ets/common/ChatLogic';
+import { LaunchRouter, LiveTimers, StartRoute } from '../main/ets/common/ChatLogic';
 import { AuthRevokedError, BridgeError, friendly } from '../main/ets/common/Errors';
 
 function c(id: string, lastAt: number): ChatEntry {
@@ -123,6 +123,31 @@ export default function batch5Test() {
       expect(roomTitle('', ['You', '园长', '小秘'])).assertEqual('我、园长、小秘');
       expect(roomTitle('', [])).assertEqual('群聊');
       expect(roomTitle('猫, 狗', [])).assertEqual('猫, 狗');
+    });
+  });
+
+  describe('liveTimers', () => {
+    it('backoffGrows', 0, () => {
+      expect(LiveTimers.backoff(0)).assertEqual(1000);
+      expect(LiveTimers.backoff(1)).assertEqual(2000);
+      expect(LiveTimers.backoff(3)).assertEqual(8000);
+      expect(LiveTimers.backoff(9)).assertEqual(30000);
+    });
+    it('stallPollsHistory', 0, () => {
+      expect(LiveTimers.shouldPoll(true, 0, 0, 10000)).assertTrue();
+      expect(LiveTimers.shouldPoll(true, 5000, 0, 10000)).assertFalse();
+      expect(LiveTimers.shouldPoll(false, 0, 0, 60000)).assertFalse();
+      expect(LiveTimers.shouldPoll(true, 0, 9000, 12000)).assertFalse();
+    });
+    it('repliedEndsWait', 0, () => {
+      expect(LiveTimers.replied([newItem('user', '测试', 1)])).assertFalse();
+      expect(LiveTimers.replied([newItem('user', '测试', 1), newItem('bot', '1', 2)])).assertTrue();
+      expect(LiveTimers.replied([newItem('bot', '旧', 1), newItem('user', '测试', 2), newItem('event', 'x', 3)])).assertFalse();
+    });
+    it('dotsCycle', 0, () => {
+      expect(LiveTimers.dotOn(0, 0)).assertTrue();
+      expect(LiveTimers.dotOn(1, 0)).assertFalse();
+      expect(LiveTimers.dotOn(4, 1)).assertTrue();
     });
   });
 

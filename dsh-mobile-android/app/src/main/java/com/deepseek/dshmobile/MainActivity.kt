@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity() {
             removePending = { vm.removePending(it) },
             toggleRun = { vm.toggleExpanded(it) },
             closeViewer = { vm.openViewer(null) },
+            save = { vm.saveAttachment(it) },
         )
     }
     private val fileLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -99,6 +100,58 @@ class MainActivity : ComponentActivity() {
         }.onFailure { vm.showNotice(if (kind == "camera") "这台手机打不开相机" else "没能打开选择器") }
     }
 
+    // ---- batch 5: notifications ----
+    private val notifyPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        vm.refreshSystem()
+        if (!ok) vm.showNotice("没有通知权限就收不到新消息提醒，可以在「设置 → 通知」里再打开")
+    }
+
+    /** Android 13+ asks once by itself after pairing; later only from 设置. Denied twice: open the phone's settings. */
+    private fun askNotify(force: Boolean = false) {
+        if (com.deepseek.dshmobile.notify.Notifier.enabled(this)) return
+        val sp = getSharedPreferences("notify", MODE_PRIVATE)
+        if (!force && sp.getBoolean("asked", false)) return
+        sp.edit().putBoolean("asked", true).apply()
+        val canAsk = android.os.Build.VERSION.SDK_INT >= 33 &&
+            (!sp.getBoolean("askedTwice", false) || shouldShowRequestPermissionRationale(android.Manifest.permission.POST_NOTIFICATIONS))
+        if (canAsk) {
+            if (force) sp.edit().putBoolean("askedTwice", true).apply()
+            notifyPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        } else runCatching {
+            startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName))
+        }
+    }
+
+    private fun openBattery() {
+        val direct = android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:$packageName"))
+        runCatching { startActivity(direct) }.recoverCatching { startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+            .onFailure { vm.showNotice("这台手机没有省电设置页，可以在系统设置里搜索「电池」") }
+    }
+
+    private fun handleOpen(intent: android.content.Intent?) {
+        val kind = intent?.getStringExtra(com.deepseek.dshmobile.notify.Notifier.EXTRA_KIND) ?: return
+        val id = intent.getStringExtra(com.deepseek.dshmobile.notify.Notifier.EXTRA_ID) ?: return
+        intent.removeExtra(com.deepseek.dshmobile.notify.Notifier.EXTRA_KIND)
+        vm.openFromNotification(kind, id, intent.getStringExtra(com.deepseek.dshmobile.notify.Notifier.EXTRA_NAME))
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        handleOpen(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        com.deepseek.dshmobile.notify.AppPresence.resumed = true
+        vm.refreshSystem()
+        if (vm.state.value.paired && vm.state.value.prefs.notify) askNotify()
+    }
+
+    override fun onPause() {
+        com.deepseek.dshmobile.notify.AppPresence.resumed = false
+        super.onPause()
+    }
+
     /** Opens the phone's own voice input; the words land in the input box. */
     private fun startVoice() {
         val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
@@ -120,8 +173,11 @@ class MainActivity : ComponentActivity() {
         intent?.data?.let { uri ->
             if (uri.scheme.equals("dshmb", ignoreCase = true)) vm.applyScannedPayload(uri.toString())
         }
+        if (savedInstanceState == null) handleOpen(intent)
         setContent {
             val state by vm.state.collectAsState()
+            // Ask for notifications once the phone is paired (state loads after onResume).
+            androidx.compose.runtime.LaunchedEffect(state.paired, state.prefs.notify) { if (state.paired && state.prefs.notify) askNotify() }
             val dark = when (state.prefs.theme) { "light" -> false; "dark" -> true; else -> androidx.compose.foundation.isSystemInDarkTheme() }
             DsTheme(dark = dark) {
               androidx.compose.runtime.CompositionLocalProvider(
@@ -168,6 +224,9 @@ class MainActivity : ComponentActivity() {
                             onTheme = vm::setTheme,
                             onUnhideAll = vm::unhideAll,
                             onLogout = { vm.logout() },
+                            onNotify = { on -> vm.setNotify(on); if (on) askNotify(force = true) },
+                            onAllowNotify = { askNotify(force = true) },
+                            onBattery = ::openBattery,
                         )
                     }
                     Screen.NewBot -> {

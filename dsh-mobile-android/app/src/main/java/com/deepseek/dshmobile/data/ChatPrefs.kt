@@ -19,6 +19,8 @@ data class ChatPrefs(
     val theme: String = THEME_SYSTEM,
     /** Chats whose 通知 switch is off: their new-message count shows gray instead of black. */
     val muted: Set<String> = emptySet(),
+    /** Global switch in 设置: system notifications for new messages and approvals. */
+    val notify: Boolean = true,
 ) {
     companion object {
         const val THEME_SYSTEM = "system"
@@ -79,6 +81,7 @@ class ChatPrefsStore(private val context: Context) {
     private val unread = stringSetPreferencesKey("unread")
     private val theme = stringPreferencesKey("theme")
     private val muted = stringSetPreferencesKey("muted")
+    private val notify = androidx.datastore.preferences.core.booleanPreferencesKey("notify")
 
     val flow: Flow<ChatPrefs> = context.prefsStore.data.map {
         ChatPrefs(
@@ -87,6 +90,7 @@ class ChatPrefsStore(private val context: Context) {
             unread = it[unread].orEmpty(),
             theme = ChatPrefsLogic.normTheme(it[theme]),
             muted = it[muted].orEmpty(),
+            notify = it[notify] ?: true,
         )
     }
 
@@ -97,6 +101,7 @@ class ChatPrefsStore(private val context: Context) {
             it[unread] = p.unread
             it[theme] = p.theme
             it[muted] = p.muted
+            it[notify] = p.notify
         }
     }
 }

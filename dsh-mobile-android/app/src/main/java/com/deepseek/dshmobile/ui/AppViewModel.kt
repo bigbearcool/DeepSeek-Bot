@@ -43,6 +43,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -112,6 +114,9 @@ data class UiState(
     val viewer: com.deepseek.dshmobile.data.Attachment? = null,
     /** Exchange runs the user opened, by the seq/time of their first item. */
     val expanded: Set<String> = emptySet(),
+    // batch 5: what the phone allows (read on every return to the app)
+    val notifyAllowed: Boolean = true,
+    val batteryFree: Boolean = true,
 ) {
     val canSend: Boolean get() = com.deepseek.dshmobile.data.AttachLogic.canSend(composeText, pending) && !sending
     val openKind: String? get() = when { selectedRoom != null -> "room"; selectedBot != null -> "bot"; else -> null }
@@ -137,7 +142,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var pollJob: Job? = null
 
     init {
-        viewModelScope.launch { prefsStore.flow.collect { p -> _state.update { it.copy(prefs = p) } } }
+        viewModelScope.launch { prefsStore.flow.collect { p -> _state.update { it.copy(prefs = p) }; syncService() } }
+        // The chat on screen gets no notification, and opening it clears its notification.
+        viewModelScope.launch {
+            state.map { s -> if (s.screen == Screen.Chat) s.openKind?.let { k -> s.openId?.let { id -> k to id } } else null }
+                .distinctUntilChanged().collect { open ->
+                    com.deepseek.dshmobile.notify.AppPresence.openKey = open?.let { com.deepseek.dshmobile.data.NotifyLogic.key(it.first, it.second) }
+                    if (open != null) com.deepseek.dshmobile.notify.Notifier.cancelChat(getApplication(), open.first, open.second)
+                }
+        }
+        viewModelScope.launch { state.map { it.paired }.distinctUntilChanged().collect { syncService() } }
         viewModelScope.launch {
             val snap = store.snapshot.first()
             _state.update { it.copy(baseUrl = snap.baseUrl.ifBlank { BuildConfig.DEFAULT_BASE_URL }, paired = snap.isPaired) }
@@ -193,6 +207,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         } else editPrefs { com.deepseek.dshmobile.data.ChatPrefsLogic.toggleUnread(it, c) }
     }
     fun openSettings() = _state.update { it.copy(screen = Screen.Settings) }
+
+    // ---- batch 5: notifications ----
+    fun setNotify(on: Boolean) = editPrefs { it.copy(notify = on) }
+    private fun syncService() {
+        val s = _state.value
+        com.deepseek.dshmobile.notify.NotifyService.sync(getApplication(), s.paired, s.prefs.notify)
+    }
+    /** Called when the app comes back to the screen: the user may have changed phone settings. */
+    fun refreshSystem() {
+        val app = getApplication<Application>()
+        val pm = app.getSystemService(android.os.PowerManager::class.java)
+        _state.update { it.copy(notifyAllowed = com.deepseek.dshmobile.notify.Notifier.enabled(app), batteryFree = pm?.isIgnoringBatteryOptimizations(app.packageName) ?: true) }
+        syncService()
+    }
+    /** A tapped notification opens its chat. */
+    fun openFromNotification(kind: String, id: String, name: String?) {
+        val entry = _state.value.chats.find { it.kind == kind && it.id == id } ?: ChatEntry(kind, id, name.orEmpty())
+        openChat(entry)
+    }
 
     // ---- batch 3: Bot profile ----
     fun toggleMute(kind: String, id: String) = editPrefs {
@@ -323,6 +356,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             val type = cr.getType(uri).orEmpty()
             val isImage = type.startsWith("image/") || forceName != null
+            if (isImage && forceName == null) name = com.deepseek.dshmobile.data.AttachLogic.niceName(name, type,
+                java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date()), uris.indexOf(uri))
             com.deepseek.dshmobile.data.AttachLogic.problem(if (size < 0) 1 else size, count)?.let { p -> showNotice(p); return }
             val p = com.deepseek.dshmobile.data.PendingAttachment("p-" + UUID.randomUUID(), uri.toString(), name, isImage, maxOf(size, 0))
             _state.update { it.copy(pending = it.pending + p) }
@@ -365,6 +400,47 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         } ?: return null
         images.put(key, bmp)
         return bmp
+    }
+
+    /** Saves a picture to 相册 or a file to 下载 (in a DS Bot folder), then says where. */
+    fun saveAttachment(a: com.deepseek.dshmobile.data.Attachment) {
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            runCatching {
+                val bytes = if (a.localUri != null) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    app.contentResolver.openInputStream(android.net.Uri.parse(a.localUri))?.use { it.readBytes() } ?: error("unreadable")
+                } else auth.withAccess { token, api -> api.attachmentBytes(token, a.id ?: error("gone")) }
+                val name = (a.name ?: if (a.isImage) "图片.png" else "文件").replace('/', '_')
+                val type = a.mediaType ?: android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase()) ?: "application/octet-stream"
+                val uri = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { saveToPhone(app, name, type, a.isImage, bytes) }
+                val view = android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(uri, type)
+                    .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                val where = com.deepseek.dshmobile.data.AttachLogic.saveFolder(a.isImage)
+                com.deepseek.dshmobile.notify.Notifier.saved(app, name, where, view)
+                showNotice("已保存到手机的「$where」")
+            }.onFailure { e -> if (e is CancellationException) throw e; showNotice("没能保存：" + friendly(e)) }
+        }
+    }
+
+    private fun saveToPhone(app: Application, name: String, type: String, image: Boolean, bytes: ByteArray): android.net.Uri {
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, name)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, type)
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, (if (image) android.os.Environment.DIRECTORY_PICTURES else android.os.Environment.DIRECTORY_DOWNLOADS) + "/DS Bot")
+                put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val coll = if (image) android.provider.MediaStore.Images.Media.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                else android.provider.MediaStore.Downloads.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val uri = app.contentResolver.insert(coll, values) ?: error("no room")
+            app.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: error("unwritable")
+            app.contentResolver.update(uri, android.content.ContentValues().apply { put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+            return uri
+        }
+        // Android 8–9: the app's own folder (no storage permission needed).
+        val dir = java.io.File(app.getExternalFilesDir(if (image) android.os.Environment.DIRECTORY_PICTURES else android.os.Environment.DIRECTORY_DOWNLOADS), "DS Bot").apply { mkdirs() }
+        val f = java.io.File(dir, name).apply { writeBytes(bytes) }
+        return androidx.core.content.FileProvider.getUriForFile(app, app.packageName + ".files", f)
     }
 
     /** Opens a file from a message in another app on the phone. */

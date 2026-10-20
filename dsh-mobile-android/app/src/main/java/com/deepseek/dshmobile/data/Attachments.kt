@@ -74,6 +74,22 @@ object AttachLogic {
         else -> null
     }
 
+    /**
+     * Gallery pictures often come named like "1000000019.png"; give them a readable name
+     * (图片_20261020_112233.png). Real names (IMG_…, 截图…) are kept.
+     */
+    fun niceName(raw: String?, mime: String?, stamp: String, index: Int): String {
+        val base = raw?.substringBeforeLast('.').orEmpty()
+        val ext = raw?.substringAfterLast('.', "")?.lowercase()?.takeIf { it.isNotEmpty() && it.length <= 5 }
+            ?: when (mime) { "image/jpeg" -> "jpg"; "image/png" -> "png"; "image/webp" -> "webp"; "image/gif" -> "gif"; "image/heic" -> "heic"; else -> "jpg" }
+        val meaningless = base.isBlank() || base.all { it.isDigit() } || base.startsWith("image:") || base.matches(Regex("[0-9a-f-]{20,}"))
+        if (!meaningless) return raw!!
+        return "图片_" + stamp + (if (index > 0) "_${index + 1}" else "") + "." + ext
+    }
+
+    /** Pictures go to 相册 (Pictures/DS Bot), other files to 下载 (Download/DS Bot). */
+    fun saveFolder(isImage: Boolean): String = if (isImage) "相册" else "下载"
+
     /** Fit a picture in a box, keeping its shape (thumbnail size). */
     fun fit(width: Int?, height: Int?, maxW: Int, maxH: Int): Pair<Int, Int> {
         if (width == null || height == null || width <= 0 || height <= 0) return maxW to (maxW * 3 / 4)

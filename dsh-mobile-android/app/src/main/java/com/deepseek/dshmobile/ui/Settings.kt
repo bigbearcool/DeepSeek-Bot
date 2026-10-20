@@ -64,6 +64,9 @@ fun SettingsScreen(
     onTheme: (String) -> Unit,
     onUnhideAll: () -> Unit,
     onLogout: () -> Unit,
+    onNotify: (Boolean) -> Unit = {},
+    onAllowNotify: () -> Unit = {},
+    onBattery: () -> Unit = {},
 ) {
     val c = LocalDs.current
     var confirm by remember { mutableStateOf(false) }
@@ -95,6 +98,21 @@ fun SettingsScreen(
                 ThemeTile(Icons.Outlined.LightMode, "浅色", state.prefs.theme == ChatPrefs.THEME_LIGHT, Modifier.weight(1f)) { onTheme(ChatPrefs.THEME_LIGHT) }
                 ThemeTile(Icons.Outlined.DarkMode, "深色", state.prefs.theme == ChatPrefs.THEME_DARK, Modifier.weight(1f)) { onTheme(ChatPrefs.THEME_DARK) }
             }
+            GroupLabel("通知")
+            SheetCard {
+                SheetRow(null, "新消息提醒", trailing = {
+                    androidx.compose.material3.Switch(state.prefs.notify, { onNotify(it) }, colors = androidx.compose.material3.SwitchDefaults.colors(
+                        checkedThumbColor = c.bg, checkedTrackColor = c.ink, uncheckedThumbColor = c.ink3, uncheckedTrackColor = c.group, uncheckedBorderColor = c.line))
+                }, onClick = { onNotify(!state.prefs.notify) })
+                if (state.prefs.notify && !state.notifyAllowed) NotifyHint("手机还没允许 DS Bot 发通知，现在收不到提醒。", "去允许", onAllowNotify)
+                if (state.prefs.notify && state.notifyAllowed && !state.batteryFree)
+                    NotifyHint("有些手机为了省电会停掉后台连接。想在锁屏时也收到提醒，请让 DS Bot 不受省电限制。", "去设置", onBattery)
+            }
+            Text(
+                if (state.prefs.notify) "电脑开着、手机连得上它时才会提醒。每个对话也可以在资料页单独关掉通知。"
+                else "关掉后不会再弹出新消息和确认请求的提醒。",
+                color = c.ink3, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+            )
             GroupLabel("对话")
             val hidden = ChatPrefsLogic.hiddenCount(state.chats, state.prefs)
             SheetCard {
@@ -122,6 +140,17 @@ fun SettingsScreen(
         confirmButton = { TextButton(onClick = { confirm = false; onLogout() }) { Text("断开", color = c.danger) } },
         dismissButton = { TextButton(onClick = { confirm = false }) { Text("取消", color = c.ink) } },
     )
+}
+
+@Composable
+private fun NotifyHint(text: String, action: String, onClick: () -> Unit) {
+    val c = LocalDs.current
+    Box(Modifier.fillMaxWidth().padding(start = 16.dp).height(1.dp).background(c.line))
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(text, color = c.ink2, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Spacer(Modifier.size(12.dp))
+        Text(action, color = c.link, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+    }
 }
 
 @Composable

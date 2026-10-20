@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -47,6 +48,7 @@ class AttachUi(
     val removePending: (String) -> Unit = {},
     val toggleRun: (String) -> Unit = {},
     val closeViewer: () -> Unit = {},
+    val save: (Attachment) -> Unit = {},
 )
 
 val LocalAttach = staticCompositionLocalOf { AttachUi() }
@@ -113,6 +115,12 @@ fun FileCard(a: Attachment) {
             Text(a.name ?: "文件", color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val size = AttachLogic.size(a.bytes)
             Text(AttachLogic.kind(a.name) + if (size.isNotEmpty()) " · $size" else "", color = c.ink3, fontSize = 13.sp)
+        }
+        if (a.id != null || a.localUri != null) {
+            Spacer(Modifier.size(6.dp))
+            Box(Modifier.size(36.dp).clip(CircleShape).clickable { ui.save(a) }, contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.FileDownload, "保存到手机", tint = c.ink3, modifier = Modifier.size(20.dp))
+            }
         }
     }
 }
@@ -214,6 +222,12 @@ fun ImageViewer(a: Attachment, onClose: () -> Unit) {
                     .background(Color.White.copy(alpha = 0.18f)).clickable(onClick = onClose),
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.Filled.Close, "关闭", tint = Color.White, modifier = Modifier.size(22.dp)) }
+            val ui = LocalAttach.current
+            Box(
+                Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(16.dp).size(40.dp).clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.18f)).clickable { ui.save(a) },
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Outlined.FileDownload, "保存到手机", tint = Color.White, modifier = Modifier.size(22.dp)) }
             a.name?.let { Text(it, color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp, modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(16.dp)) }
         }
     }

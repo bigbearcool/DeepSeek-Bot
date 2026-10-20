@@ -9,6 +9,7 @@ import { createLiveFeed } from './src/live-feed.js'
 import { installRoutes } from './src/routes.js'
 import { startDeviceServer } from './src/device-server.js'
 import { createAttachments } from './src/attachments.js'
+import { installInspectorBudgetGuard } from './src/inspector-guard.js'
 
 export const name = NAME
 export const inject = ['connection', 'sessionController']
@@ -31,6 +32,11 @@ export function createRuntime(ctx, config = {}) {
   const botHome = config.botHome ?? join(dshHome, 'bot')
   const adapter = createDsBotAdapter({ dshHome, botHome, ctx })
   const diag = createDiag({ logger: ctx.logger, name: NAME, ...(config.quietDiag ? { print: null } : {}) })
+  // Upstream inspector (#10259) can kill dsh on group rounds; contain before feed listeners.
+  if (config.guardInspectorBudget !== false) {
+    ctx.effect?.(() => installInspectorBudgetGuard({ diag, logger: ctx.logger }), `${NAME}: inspector budget guard`)
+      ?? installInspectorBudgetGuard({ diag, logger: ctx.logger })
+  }
   const attachments = createAttachments({ ctx })
   const feed = createLiveFeed({ ctx, adapter, diag, files: attachments })
   const rt = {

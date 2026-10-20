@@ -82,6 +82,8 @@ class MainActivity : ComponentActivity() {
                         onOpenRoom = { vm.openRoom(it) },
                         onNewBot = vm::openNewBot,
                         onNewRoom = vm::openNewRoom,
+                        onOpenChat = vm::openChat,
+                        onAnswer = vm::answerApproval,
                     )
                     Screen.NewBot -> {
                         BackHandler { if (state.folderListing != null) vm.closeFolderBrowser() else vm.closeForm() }
@@ -115,6 +117,8 @@ class MainActivity : ComponentActivity() {
                             onComposeChange = vm::onComposeChange,
                             onSend = vm::sendMessage,
                             onDismissWait = vm::dismissWait,
+                            onStop = vm::stopReply,
+                            onAnswer = vm::answerApproval,
                         )
                     }
                 }

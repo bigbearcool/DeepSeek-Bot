@@ -144,6 +144,26 @@ class BridgeApi(
         suspend fun createRoom(accessToken: String, draft: NewRoomDraft): RoomInfo =
             parseRoom(postJson("/rooms/create", draft.toJson(), accessToken).getJSONObject("room"))
 
+        suspend fun chatList(accessToken: String): ChatListResponse = parseChatList(getJson("/chats/list", accessToken))
+
+        /** Mark a chat read up to now on this device (opening it clears its count). */
+        suspend fun markRead(accessToken: String, kind: String, id: String) {
+            postJson("/chats/read", JSONObject().put("kind", kind).put("id", id), accessToken)
+        }
+
+        /** Stop a Bot's reply in its own chat. */
+        suspend fun stopBot(accessToken: String, botId: String): Boolean =
+            postJson("/chats/stop", JSONObject().put("botId", botId), accessToken).optBoolean("stopped", false)
+
+        /** Stop every member still replying in a group chat. */
+        suspend fun stopRoom(accessToken: String, roomId: String): Int =
+            postJson("/rooms/stop", JSONObject().put("roomId", roomId), accessToken).optInt("stopped", 0)
+
+        /** choice: "allow" | "reject" (ds-bot's own words). */
+        suspend fun answerApproval(accessToken: String, id: String, choice: String) {
+            postJson("/approvals/answer", JSONObject().put("id", id).put("choice", choice), accessToken)
+        }
+
         private fun enc(v: String) = java.net.URLEncoder.encode(v, "UTF-8")
 
         fun streamUrl(botId: String? = null, test: Boolean = false, roomId: String? = null, since: Long? = null): String {

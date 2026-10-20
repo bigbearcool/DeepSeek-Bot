@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -65,7 +66,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.deepseek.dshmobile.data.ApprovalInfo
 import com.deepseek.dshmobile.data.BotInfo
+import com.deepseek.dshmobile.data.ChatEntry
+import com.deepseek.dshmobile.data.ChatListLogic
 import com.deepseek.dshmobile.data.ChatItem
 import com.deepseek.dshmobile.data.LiveReply
 import com.deepseek.dshmobile.data.RoomInfo
@@ -264,6 +268,8 @@ fun TeamScreen(
     onOpenRoom: (RoomInfo) -> Unit = {},
     onNewBot: () -> Unit = {},
     onNewRoom: () -> Unit = {},
+    onOpenChat: (ChatEntry) -> Unit = {},
+    onAnswer: (String, Boolean) -> Unit = { _, _ -> },
 ) {
     val c = LocalDs.current
     var menu by remember { mutableStateOf(false) }
@@ -301,6 +307,20 @@ fun TeamScreen(
                 Text("还没有助手", color = c.ink3, fontSize = 14.sp)
                 Spacer(Modifier.height(16.dp))
                 PrimaryButton("新建助手", onClick = onNewBot)
+            }
+            return@Column
+        }
+        if (state.chats.isNotEmpty()) {
+            LazyColumn(Modifier.fillMaxSize().navigationBarsPadding(), contentPadding = PaddingValues(vertical = 8.dp)) {
+                if (state.approvals.isNotEmpty()) {
+                    item(key = "h-approvals") { SectionLabel("等你确认") }
+                    items(state.approvals, key = { "ap-" + it.id }) { a ->
+                        ApprovalCard(a, busy = a.id in state.answering, showWhere = true, onAnswer = onAnswer,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                    }
+                    item(key = "h-chats") { SectionLabel("对话") }
+                }
+                items(state.chats, key = { it.kind + "-" + it.id }) { chat -> ChatRow(chat, state, onClick = { onOpenChat(chat) }) }
             }
             return@Column
         }
@@ -356,6 +376,113 @@ fun TeamScreen(
     }
 }
 
+/** One conversation: avatar, name, last message, time, unread badge, "正在回复". */
+@Composable
+private fun ChatRow(chat: ChatEntry, state: UiState, onClick: () -> Unit) {
+    val c = LocalDs.current
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (chat.isRoom) {
+            val names = state.rooms.find { it.id == chat.id }?.memberNames
+                ?: chat.members.mapNotNull { id -> state.bots.find { it.id == id }?.name }
+            RoomAvatar(names)
+        } else Avatar(chat.name, 44, chat.color ?: state.bots.find { it.id == chat.id }?.color)
+        Spacer(Modifier.size(14.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    chat.name, color = c.ink, fontSize = 16.sp,
+                    fontWeight = if (chat.unread > 0) FontWeight.SemiBold else FontWeight.Medium,
+                    maxLines = 1, modifier = Modifier.weight(1f, fill = false),
+                )
+                if (chat.main) {
+                    Spacer(Modifier.size(6.dp))
+                    Text(
+                        "主助手", color = c.ink2, fontSize = 11.sp,
+                        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(c.tagBg).padding(horizontal = 6.dp, vertical = 1.dp),
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                Text(ChatListLogic.timeLabel(chat.lastAt), color = c.ink3, fontSize = 12.sp, maxLines = 1)
+            }
+            Spacer(Modifier.height(3.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val waiting = state.approvals.any { a -> if (chat.isRoom) a.roomId == chat.id else a.roomId == null && a.botId == chat.id }
+                val line = when {
+                    waiting -> "等你确认"
+                    chat.running -> "正在回复…"
+                    chat.preview.isNotBlank() -> chat.preview
+                    chat.isRoom -> state.rooms.find { it.id == chat.id }?.memberNames?.joinToString("、").orEmpty()
+                    else -> state.bots.find { it.id == chat.id }?.role.orEmpty()
+                }
+                Text(
+                    line, color = if (waiting) c.danger else if (chat.running) c.accent else c.ink3,
+                    fontSize = 13.sp, maxLines = 1, modifier = Modifier.weight(1f),
+                )
+                ChatListLogic.badge(chat.unread)?.let { b ->
+                    Spacer(Modifier.size(8.dp))
+                    Box(
+                        Modifier.clip(RoundedCornerShape(10.dp)).background(c.danger).padding(horizontal = 6.dp, vertical = 1.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { Text(b, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                }
+            }
+        }
+    }
+}
+
+/** A request from a Bot that needs the user's yes or no. */
+@Composable
+internal fun ApprovalCard(
+    a: ApprovalInfo,
+    busy: Boolean,
+    showWhere: Boolean,
+    onAnswer: (String, Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val c = LocalDs.current
+    Column(
+        modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.card)
+            .border(1.dp, c.line, RoundedCornerShape(16.dp)).padding(14.dp),
+    ) {
+        Text(
+            (if (showWhere) ChatListLogic.whereText(a) + " " else "") + "想" + a.action,
+            color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+        )
+        if (a.reason.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Text(a.reason, color = c.ink2, fontSize = 13.sp, maxLines = 3)
+        }
+        if (a.detail.isNotBlank()) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                a.detail, color = c.ink2, fontSize = 13.sp, maxLines = 4,
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.surface).padding(8.dp),
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        if (!a.answerable) {
+            Text("这个请求需要在电脑上确认", color = c.ink3, fontSize = 13.sp)
+        } else Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(
+                Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(19.dp)).background(c.bubble)
+                    .clickable(enabled = !busy) { onAnswer(a.id, false) },
+                contentAlignment = Alignment.Center,
+            ) { Text("拒绝", color = c.ink, fontSize = 14.sp) }
+            Box(
+                Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(19.dp)).background(c.user)
+                    .clickable(enabled = !busy) { onAnswer(a.id, true) },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (busy) CircularProgressIndicator(Modifier.size(16.dp), color = c.userInk, strokeWidth = 2.dp)
+                else Text("同意", color = c.userInk, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}
+
 @Composable
 internal fun SectionLabel(text: String) {
     val c = LocalDs.current
@@ -372,11 +499,13 @@ fun ChatScreen(
     onComposeChange: (String) -> Unit,
     onSend: () -> Unit,
     onDismissWait: () -> Unit,
+    onStop: () -> Unit = {},
+    onAnswer: (String, Boolean) -> Unit = { _, _ -> },
 ) {
     val c = LocalDs.current
     val list = rememberLazyListState()
     val liveShown = state.live.mapNotNull { r -> RoomStreams.shown(r)?.let { r to it } }
-    val count = state.messages.size + (if (state.wait.visible) 1 else 0) + liveShown.size
+    val count = state.messages.size + (if (state.wait.visible) 1 else 0) + liveShown.size + state.openApprovals.size
     LaunchedEffect(count, state.wait.text.length / 80, liveShown.sumOf { it.second.length } / 80) {
         val n = list.layoutInfo.totalItemsCount
         if (count > 0 && n > 0) list.animateScrollToItem(n - 1)
@@ -419,8 +548,11 @@ fun ChatScreen(
                 Text("${typing.joinToString("、")} 正在回复…", color = c.ink3, fontSize = 13.sp)
             }
             if (state.wait.visible && !(state.inRoom && state.wait.phase == WaitPhase.Streaming)) item(key = "wait") { WaitCard(state.wait, onDismissWait) }
+            items(state.openApprovals, key = { "ap-" + it.id }) { a ->
+                ApprovalCard(a, busy = a.id in state.answering, showWhere = state.inRoom, onAnswer = onAnswer)
+            }
         }
-        Composer(state.composeText, state.sending, onComposeChange, onSend)
+        Composer(state.composeText, state.sending, onComposeChange, onSend, showStop = state.showStop, stopping = state.stopping, onStop = onStop)
     }
 }
 
@@ -454,7 +586,7 @@ private fun MessageRow(item: ChatItem, colorOf: (String) -> String? = { null }) 
                 "resumed" -> "${item.name ?: "助手"} 的工作被电脑重启打断，正在继续"
                 "cut" -> "${item.name ?: "助手"} 的工作再次被重启打断，已停下"
                 "failed" -> "${item.name ?: "助手"} 这次没能回复，请稍后再试，或在电脑上查看原因"
-                "approval" -> "${item.name ?: "助手"} 在等你在电脑上确认"
+                "approval" -> "${item.name ?: "助手"} 在等你确认"
                 "working" -> "${item.name ?: "助手"} 还在忙，做完会回到群里"
                 "missed" -> "${item.name ?: "助手"} 没赶上这一轮"
                 "quiet" -> "这一轮没有成员回复"
@@ -544,9 +676,14 @@ fun WaitCard(wait: WaitState, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun Composer(text: String, sending: Boolean, onChange: (String) -> Unit, onSend: () -> Unit) {
+private fun Composer(
+    text: String, sending: Boolean, onChange: (String) -> Unit, onSend: () -> Unit,
+    showStop: Boolean = false, stopping: Boolean = false, onStop: () -> Unit = {},
+) {
     val c = LocalDs.current
     val canSend = text.isNotBlank() && !sending
+    // While a reply runs and nothing is typed, the round button stops it.
+    val stopMode = showStop && text.isBlank() && !sending
     Row(
         Modifier.fillMaxWidth().background(c.bg).navigationBarsPadding().padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.Bottom,
@@ -567,7 +704,13 @@ private fun Composer(text: String, sending: Boolean, onChange: (String) -> Unit,
             )
         }
         Spacer(Modifier.size(8.dp))
-        Box(
+        if (stopMode) Box(
+            Modifier.size(44.dp).clip(CircleShape).background(c.user).clickable(enabled = !stopping, onClick = onStop),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (stopping) CircularProgressIndicator(Modifier.size(18.dp), color = c.userInk, strokeWidth = 2.dp)
+            else Icon(Icons.Filled.Stop, "停止", tint = c.userInk)
+        } else Box(
             Modifier.size(44.dp).clip(CircleShape).background(if (canSend) c.user else c.bubble)
                 .clickable(enabled = canSend, onClick = onSend),
             contentAlignment = Alignment.Center,

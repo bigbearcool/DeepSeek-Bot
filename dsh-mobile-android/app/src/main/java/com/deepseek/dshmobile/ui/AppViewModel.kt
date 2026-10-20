@@ -31,6 +31,9 @@ import com.deepseek.dshmobile.data.WaitPhase
 import com.deepseek.dshmobile.data.RoomRound
 import com.deepseek.dshmobile.data.WaitState
 import com.deepseek.dshmobile.data.parseChatItem
+import com.deepseek.dshmobile.data.ApprovalInfo
+import com.deepseek.dshmobile.data.ChatEntry
+import com.deepseek.dshmobile.data.ChatListLogic
 import com.deepseek.dshmobile.dsh
 import com.deepseek.dshmobile.util.PairCode
 import kotlinx.coroutines.CancellationException
@@ -83,7 +86,20 @@ data class UiState(
     val folderListing: FolderListing? = null,
     val creating: Boolean = false,
     val formError: String? = null,
+    // ---- conversation list, unread, stop, approvals ----
+    /** Bot chats and group chats, newest activity first. */
+    val chats: List<ChatEntry> = emptyList(),
+    val approvals: List<ApprovalInfo> = emptyList(),
+    /** Approvals being answered right now (buttons locked). */
+    val answering: Set<String> = emptySet(),
+    val stopping: Boolean = false,
 ) {
+    val openKind: String? get() = when { selectedRoom != null -> "room"; selectedBot != null -> "bot"; else -> null }
+    val openId: String? get() = selectedRoom?.id ?: selectedBot?.id
+    /** The computer says a reply is running in the open chat. */
+    val openRunning: Boolean get() = chats.any { it.kind == openKind && it.id == openId && it.running }
+    val openApprovals: List<ApprovalInfo> get() = ChatListLogic.approvalsFor(approvals, openKind, openId)
+    val showStop: Boolean get() = ChatListLogic.showStop(openRunning, wait.visible && wait.phase != WaitPhase.Failed)
     val inRoom: Boolean get() = selectedRoom != null
     val chatTitle: String get() = selectedRoom?.name ?: selectedBot?.name.orEmpty()
 }
@@ -97,6 +113,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private var streamJob: Job? = null
+    private var pollJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -218,6 +235,101 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             .onFailure { onFailure(it) }
+        refreshChats()
+        startPolling()
+    }
+
+    // ---- conversation list (sorted, previews, unread, running, approvals) ----
+    private suspend fun refreshChats() {
+        runCatching { auth.withAccess { token, api -> api.chatList(token) } }
+            .onSuccess { list ->
+                val st = _state.value
+                val openUnread = list.chats.any { it.kind == st.openKind && it.id == st.openId && it.unread > 0 }
+                _state.update {
+                    it.copy(
+                        chats = ChatListLogic.clearOpen(ChatListLogic.sorted(list.chats), it.openKind, it.openId),
+                        approvals = list.approvals,
+                        answering = it.answering.intersect(list.approvals.map { a -> a.id }.toSet()),
+                    )
+                }
+                // Messages that arrived while the chat is on screen are read.
+                if (openUnread && st.screen == Screen.Chat) markOpenRead()
+            }
+            .onFailure { e -> if (e is CancellationException) throw e; if (LaunchRouter.requiresRepair(e)) onFailure(e) }
+    }
+
+    /** Keeps the list, running state and approvals fresh while the app is open. */
+    private fun startPolling() {
+        if (pollJob?.isActive == true) return
+        pollJob = viewModelScope.launch {
+            while (isActive) {
+                delay(if (_state.value.screen == Screen.Chat) 3_000L else 5_000L)
+                if (_state.value.paired && _state.value.screen in setOf(Screen.Team, Screen.Chat)) refreshChats()
+            }
+        }
+    }
+
+    private suspend fun markOpenRead() {
+        val st = _state.value
+        val kind = st.openKind ?: return
+        val id = st.openId ?: return
+        _state.update { it.copy(chats = ChatListLogic.clearOpen(it.chats, kind, id)) }
+        runCatching { auth.withAccess { token, api -> api.markRead(token, kind, id) } }
+    }
+
+    fun stopReply() {
+        val st = _state.value
+        if (st.stopping) return
+        val kind = st.openKind ?: return
+        val id = st.openId ?: return
+        _state.update { it.copy(stopping = true, notice = null) }
+        viewModelScope.launch {
+            runCatching { auth.withAccess { token, api -> if (kind == "room") api.stopRoom(token, id) else api.stopBot(token, id) } }
+                .onSuccess {
+                    _state.update { s ->
+                        s.copy(
+                            stopping = false,
+                            chats = s.chats.map { c -> if (c.kind == kind && c.id == id) c.copy(running = false) else c },
+                            wait = if (s.wait.phase == WaitPhase.Streaming || s.wait.phase == WaitPhase.Waiting) WaitMachine.reduce(s.wait, WaitEvent.Dismiss) else s.wait,
+                            live = s.live.map { r -> if (r.endedAt == null) r.copy(endedAt = System.currentTimeMillis()) else r },
+                        )
+                    }
+                    if (kind == "bot") loadHistory(reset = true)
+                    refreshChats()
+                }
+                .onFailure { e ->
+                    if (e is CancellationException) throw e
+                    if (LaunchRouter.requiresRepair(e)) { onFailure(e); return@onFailure }
+                    _state.update { it.copy(stopping = false, notice = "没能停下来：" + friendly(e)) }
+                }
+        }
+    }
+
+    /** allow = 同意, reject = 拒绝. */
+    fun answerApproval(id: String, allow: Boolean) {
+        if (id in _state.value.answering) return
+        _state.update { it.copy(answering = it.answering + id, notice = null) }
+        viewModelScope.launch {
+            runCatching { auth.withAccess { token, api -> api.answerApproval(token, id, if (allow) "allow" else "reject") } }
+                .onSuccess { _state.update { it.copy(approvals = it.approvals.filter { a -> a.id != id }, answering = it.answering - id) } }
+                .onFailure { e ->
+                    if (e is CancellationException) throw e
+                    if (LaunchRouter.requiresRepair(e)) { onFailure(e); return@onFailure }
+                    _state.update { it.copy(answering = it.answering - id, notice = friendly(e)) }
+                }
+            refreshChats()
+        }
+    }
+
+    /** From the list: open whichever chat a row is. */
+    fun openChat(entry: ChatEntry) {
+        if (entry.isRoom) {
+            val room = _state.value.rooms.find { it.id == entry.id } ?: RoomInfo(entry.id, entry.name, members = entry.members)
+            openRoom(room)
+        } else {
+            val bot = _state.value.bots.find { it.id == entry.id } ?: BotInfo(entry.id, entry.name, null, null, null, entry.main, entry.color)
+            openBot(bot)
+        }
     }
 
     fun openBot(bot: BotInfo) = viewModelScope.launch {
@@ -237,10 +349,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         store.setLastBotId(bot.id)
         loadHistory(reset = true)
         startStream(bot.id)
+        markOpenRead()
     }
 
     fun backToTeam() {
         stopStream()
+        // What arrived while the chat was open has been seen.
+        viewModelScope.launch { markOpenRead(); refreshChats() }
         viewModelScope.launch { store.setLastBotId(null) }
         _state.update {
             it.copy(screen = Screen.Team, selectedBot = null, selectedRoom = null, live = emptyList(), messages = emptyList(), wait = WaitState(), formError = null)
@@ -401,6 +516,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         store.setLastBotId(ROOM_KEY_PREFIX + room.id)
         loadRoomHistory(room.id)
         startStream(botId = null, roomId = room.id)
+        markOpenRead()
     }
 
     private suspend fun loadRoomHistory(roomId: String) {
@@ -605,6 +721,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         stopStream()
+        pollJob?.cancel()
         super.onCleared()
     }
 }

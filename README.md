@@ -80,7 +80,7 @@ cd dsh-mobile-android
 
 | 日期 | 合并提交 | 上游 PR |
 |---|---|---|
-| 2026-10-20 | `MERGESHA` | #366 可在 DS Bot 设置里修改团队工作区和数据位置（桌面应用可迁移数据目录）<br>#367 发布 0.2.0：版本号、changelog 和桌面应用安装说明<br>#368 普通会话引导使用可用的提问工具<br>#369 转发消息正文里不再带方括号的 Bot 名 |
+| 2026-10-20 | `053ef42` | #366 可在 DS Bot 设置里修改团队工作区和数据位置（桌面应用可迁移数据目录）<br>#367 发布 0.2.0：版本号、changelog 和桌面应用安装说明<br>#368 普通会话引导使用可用的提问工具<br>#369 转发消息正文里不再带方括号的 Bot 名 |
 | 2026-10-20 | `4b722f6` | #365 macOS 应用改为 zip 打包发布（不再使用 dmg） |
 | 2026-10-20 | `f7b8fb5` | #363 Windows 桌面无边框窗口，Win11 启用 Mica；stylesheet 加载后重测 caption 颜色；右侧栏避开 caption 带 |
 | 2026-10-20 | `d02f761` | #354 macOS 通用包单独报错（Stop a universal macOS build with its own message）<br>#355 macOS 加 File 菜单，Cmd+W 关窗<br>#358 发布演练把安装包保留为 workflow 产物<br>#359 发布演练打包不再访问 registry<br>#360 首次运行中途退出时什么都不写入<br>#361 会话要等 DSH 列表里有了才打开 |

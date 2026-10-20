@@ -1,4 +1,4 @@
-import { API_PREFIX, AVATAR_SHAPES, FORM_LIMITS, INK_HEX, NAME, VERSION, appUrlOf, cleanHttpUrl } from './constants.js'
+import { API_PREFIX, AVATAR_SHAPES, FORM_LIMITS, INK_HEX, NAME, PICKER_COLORS, VERSION, appUrlOf, cleanHttpUrl } from './constants.js'
 import { DsBotError } from './dsbot-api.js'
 import { head } from './diag.js'
 import { stat } from 'node:fs/promises'
@@ -44,6 +44,41 @@ export function createRoomPayload(body = {}) {
   const members = admin ? [admin, ...ids.filter(id => id !== admin)] : ids
   const name = str(body.name)?.trim()
   return { members, ...(admin ? { admin } : {}), greet: true, ...(name ? { name } : {}) }
+}
+
+/** The fields the phone may change on a Bot, in ds-bot update-bot form. ds-bot checks every value. */
+export function updateBotPayload(body = {}) {
+  const out = { id: str(body.id) ?? '' }
+  for (const key of ['name', 'role', 'instructions']) if (str(body[key]) !== undefined) out[key] = body[key]
+  if (str(body.color) !== undefined || body.color === null) out.color = body.color
+  if (str(body.shape) !== undefined) out.avatar = { shape: body.shape }
+  else if (body.shape === null) out.avatar = null
+  return out
+}
+
+/** The fields the phone may change on a group chat, in ds-bot update-room form. */
+export function updateRoomPayload(body = {}) {
+  const ids = v => (Array.isArray(v) ? v.filter(id => typeof id === 'string' && id) : undefined)
+  const out = { id: str(body.id) ?? '' }
+  if (str(body.name) !== undefined) out.name = body.name
+  const add = ids(body.add); if (add?.length) out.add = add
+  const remove = ids(body.remove); if (remove?.length) out.remove = remove
+  return out
+}
+
+/** Message search over group logs and recent Bot chats; small and bounded. */
+export function searchHits(q, rows, max = 30) {
+  const needle = String(q ?? '').trim().toLowerCase()
+  if (!needle) return []
+  const out = []
+  for (const row of rows) {
+    if (typeof row.text !== 'string' || !row.text.toLowerCase().includes(needle)) continue
+    const at = row.text.toLowerCase().indexOf(needle)
+    const start = Math.max(0, at - 20)
+    out.push({ ...row, text: (start > 0 ? '…' : '') + row.text.slice(start, start + 80) })
+    if (out.length >= max) break
+  }
+  return out
 }
 
 function publicBot(bot = {}) {
@@ -443,6 +478,66 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
       }))
     }
 
+    if (method === 'GET' && sub === '/bots/info') {
+      return withAuth(request, async () => {
+        const id = new URL(request.url).searchParams.get('id') ?? ''
+        const state = await adapter.readState()
+        const bot = id ? state?.bots?.[id] : undefined
+        if (!bot) return error(404, 'Unknown Bot', { zh: '找不到这个助手' })
+        return json({
+          ok: true,
+          bot: {
+            ...publicBot(bot), main: Array.isArray(state.mainBotIds) && state.mainBotIds.includes(bot.id),
+            instructions: typeof bot.instructions === 'string' ? bot.instructions : '',
+          },
+          shapes: AVATAR_SHAPES,
+          colors: PICKER_COLORS.map(color => ({ id: color, hex: INK_HEX[color] })),
+        })
+      })
+    }
+
+    if (method === 'POST' && sub === '/bots/update') {
+      return withAuth(request, async () => dsCall(async () => {
+        const payload = updateBotPayload(await readJson(request))
+        if (!payload.id) throw Object.assign(new Error('id required'), { status: 400 })
+        const bot = await dsbot.call('update-bot', payload)
+        return { ok: true, bot: { ...publicBot(bot), instructions: typeof bot?.instructions === 'string' ? bot.instructions : '' } }
+      }))
+    }
+
+    if (method === 'POST' && sub === '/rooms/update') {
+      return withAuth(request, async () => dsCall(async () => {
+        const payload = updateRoomPayload(await readJson(request))
+        if (!payload.id) throw Object.assign(new Error('id required'), { status: 400 })
+        const value = await dsbot.call('update-room', payload)
+        const room = value?.room ?? {}
+        return { ok: true, room: { id: room.id ?? payload.id, name: room.name ?? '', members: room.members ?? [] }, changes: value?.changes ?? null }
+      }))
+    }
+
+    if (method === 'GET' && sub === '/search') {
+      return withAuth(request, async () => {
+        const q = new URL(request.url).searchParams.get('q') ?? ''
+        if (!q.trim()) return json({ ok: true, hits: [] })
+        const state = await adapter.readState()
+        const rows = []
+        for (const room of Object.values(state?.rooms ?? {})) {
+          if (!room?.id || room.hidden === true) continue
+          for (const line of [...(room.log ?? [])].reverse()) {
+            if (line.kind === undefined && line.text) rows.push({ kind: 'room', id: room.id, name: room.name ?? '', who: line.who === 'User' ? '你' : line.who, text: line.text, seq: line.seq ?? null })
+          }
+        }
+        for (const bot of Object.values(state?.bots ?? {})) {
+          let page
+          try { page = await adapter.history({ botId: bot.id, limit: 100 }) } catch { continue }
+          for (const item of [...(page?.items ?? [])].reverse()) {
+            if ((item.kind === 'bot' || item.kind === 'user') && item.text) rows.push({ kind: 'bot', id: bot.id, name: bot.name, who: item.kind === 'user' ? '你' : bot.name, text: item.text, seq: item.seq ?? null })
+          }
+        }
+        return json({ ok: true, hits: searchHits(q, rows) })
+      })
+    }
+
     if (method === 'POST' && sub === '/rooms/create') {
       return withAuth(request, async () => dsCall(async () => {
         const body = await readJson(request)
@@ -558,6 +653,10 @@ export function installRoutes(rt) {
     ['/bots/create', ['POST']],
     ['/folders', ['GET']],
     ['/rooms/create', ['POST']],
+    ['/bots/info', ['GET']],
+    ['/bots/update', ['POST']],
+    ['/rooms/update', ['POST']],
+    ['/search', ['GET']],
     ['/rooms/history', ['GET']],
     ['/rooms/send', ['POST']],
     ['/rooms/stop', ['POST']],

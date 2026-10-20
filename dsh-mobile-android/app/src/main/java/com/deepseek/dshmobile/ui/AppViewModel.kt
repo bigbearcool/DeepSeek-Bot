@@ -48,7 +48,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.UUID
 
-enum class Screen { Loading, Pair, Team, Chat, NewBot, NewRoom, Settings }
+enum class Screen { Loading, Pair, Team, Chat, NewBot, NewRoom, Settings, BotProfile, GroupInfo, AddMember, Search }
 
 const val ROOM_KEY_PREFIX = "room:"
 const val NO_NETWORK = "网络不通，请检查网络后重试"
@@ -98,6 +98,14 @@ data class UiState(
     val prefs: com.deepseek.dshmobile.data.ChatPrefs = com.deepseek.dshmobile.data.ChatPrefs(),
     /** The message being answered (quoted when sent). */
     val replyTo: ReplyTarget? = null,
+    // batch 3: profile, group info, search
+    val profile: com.deepseek.dshmobile.data.BotProfile? = null,
+    val profileBack: Screen = Screen.Chat,
+    val saving: Boolean = false,
+    val searchQuery: String = "",
+    val searchHits: List<com.deepseek.dshmobile.data.SearchHit> = emptyList(),
+    val searchingMessages: Boolean = false,
+    val addPicked: Set<String> = emptySet(),
 ) {
     val openKind: String? get() = when { selectedRoom != null -> "room"; selectedBot != null -> "bot"; else -> null }
     val openId: String? get() = selectedRoom?.id ?: selectedBot?.id
@@ -178,6 +186,111 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         } else editPrefs { com.deepseek.dshmobile.data.ChatPrefsLogic.toggleUnread(it, c) }
     }
     fun openSettings() = _state.update { it.copy(screen = Screen.Settings) }
+
+    // ---- batch 3: Bot profile ----
+    fun toggleMute(kind: String, id: String) = editPrefs {
+        val k = "$kind:$id"
+        it.copy(muted = if (k in it.muted) it.muted - k else it.muted + k)
+    }
+
+    /** Opens a Bot's profile; back returns to where it was opened from. */
+    fun openProfile(botId: String) {
+        val bot = _state.value.bots.find { it.id == botId }
+        val back = _state.value.screen.let { if (it == Screen.BotProfile) Screen.Chat else it }
+        _state.update {
+            it.copy(
+                screen = Screen.BotProfile, profileBack = back, formError = null,
+                profile = bot?.let { b -> com.deepseek.dshmobile.data.BotProfile(b.id, b.name, b.role.orEmpty(), "", b.shape, b.color, b.main) },
+            )
+        }
+        viewModelScope.launch {
+            runCatching { auth.withAccess { token, api -> api.botInfo(token, botId) } }
+                .onSuccess { p -> _state.update { if (it.profile?.id == p.id || it.profile == null) it.copy(profile = p) else it } }
+                .onFailure { e -> if (e is CancellationException) throw e; _state.update { it.copy(formError = friendly(e)) } }
+        }
+    }
+
+    fun closeProfile() = _state.update { it.copy(screen = it.profileBack, formError = null) }
+
+    /** Saves one change to the Bot on the computer, then shows what the computer kept. */
+    fun saveProfile(change: org.json.JSONObject) {
+        val p = _state.value.profile ?: return
+        change.put("id", p.id)
+        _state.update { it.copy(saving = true, formError = null) }
+        viewModelScope.launch {
+            runCatching { auth.withAccess { token, api -> api.updateBot(token, change) } }
+                .onSuccess { next ->
+                    _state.update { s ->
+                        s.copy(
+                            saving = false, profile = next.copy(main = p.main),
+                            bots = s.bots.map { if (it.id == next.id) it.copy(name = next.name, role = next.role, color = next.color, shape = next.shape) else it },
+                            selectedBot = s.selectedBot?.let { if (it.id == next.id) it.copy(name = next.name, color = next.color, shape = next.shape) else it },
+                            chats = s.chats.map { if (it.kind == "bot" && it.id == next.id) it.copy(name = next.name, color = next.color) else it },
+                        )
+                    }
+                }
+                .onFailure { e ->
+                    if (e is CancellationException) throw e
+                    _state.update { it.copy(saving = false, formError = friendly(e)) }
+                }
+        }
+    }
+
+    fun setShape(shape: String) = saveProfile(org.json.JSONObject().put("shape", shape))
+    fun setColor(color: String) = saveProfile(org.json.JSONObject().put("color", color))
+    fun resetLook() = saveProfile(org.json.JSONObject().put("shape", org.json.JSONObject.NULL).put("color", org.json.JSONObject.NULL))
+    fun saveText(field: String, value: String) = saveProfile(org.json.JSONObject().put(field, value))
+
+    // ---- batch 3: group info, add member ----
+    fun openGroupInfo() = _state.update { it.copy(screen = Screen.GroupInfo, formError = null) }
+    fun closeGroupInfo() = _state.update { it.copy(screen = Screen.Chat, formError = null) }
+    fun openAddMember() = _state.update { it.copy(screen = Screen.AddMember, addPicked = emptySet(), formError = null) }
+    fun closeAddMember() = _state.update { it.copy(screen = Screen.GroupInfo, formError = null) }
+    fun toggleAddPick(id: String) = _state.update { it.copy(addPicked = if (id in it.addPicked) it.addPicked - id else it.addPicked + id) }
+
+    fun addMembers() {
+        val st = _state.value
+        val room = st.selectedRoom ?: return
+        if (st.addPicked.isEmpty() || st.saving) return
+        _state.update { it.copy(saving = true, formError = null) }
+        viewModelScope.launch {
+            runCatching { auth.withAccess { token, api -> api.addMembers(token, room.id, st.addPicked.toList()) } }
+                .onSuccess { r ->
+                    _state.update { s ->
+                        val next = (s.selectedRoom ?: room).copy(members = r.members.ifEmpty { room.members + st.addPicked })
+                        s.copy(saving = false, screen = Screen.GroupInfo, addPicked = emptySet(), selectedRoom = next,
+                            rooms = s.rooms.map { if (it.id == next.id) next else it })
+                    }
+                    loadTeam()
+                }
+                .onFailure { e ->
+                    if (e is CancellationException) throw e
+                    _state.update { it.copy(saving = false, formError = friendly(e)) }
+                }
+        }
+    }
+
+    // ---- batch 3: search ----
+    private var searchJob: kotlinx.coroutines.Job? = null
+    fun openSearch() = _state.update { it.copy(screen = Screen.Search, searchQuery = "", searchHits = emptyList()) }
+    fun closeSearch() { searchJob?.cancel(); _state.update { it.copy(screen = Screen.Team, searchQuery = "", searchHits = emptyList(), searchingMessages = false) } }
+    fun onSearch(q: String) {
+        _state.update { it.copy(searchQuery = q) }
+        searchJob?.cancel()
+        if (q.trim().length < 1) { _state.update { it.copy(searchHits = emptyList(), searchingMessages = false) }; return }
+        searchJob = viewModelScope.launch {
+            delay(350)
+            _state.update { it.copy(searchingMessages = true) }
+            val hits = runCatching { auth.withAccess { token, api -> api.search(token, q.trim()) } }.getOrElse { e -> if (e is CancellationException) throw e; emptyList() }
+            _state.update { if (it.searchQuery == q) it.copy(searchHits = hits, searchingMessages = false) else it }
+        }
+    }
+    fun openHit(hit: com.deepseek.dshmobile.data.SearchHit) {
+        searchJob?.cancel()
+        val entry = _state.value.chats.find { it.kind == hit.kind && it.id == hit.id } ?: ChatEntry(hit.kind, hit.id, hit.name)
+        _state.update { it.copy(searchQuery = "", searchHits = emptyList()) }
+        openChat(entry)
+    }
     fun closeSettings() = _state.update { it.copy(screen = Screen.Team) }
     fun setReply(r: ReplyTarget?) = _state.update { it.copy(replyTo = r) }
     fun attachLater(kind: String) = _state.update { it.copy(notice = "发送文件和图片下一版就能用") }

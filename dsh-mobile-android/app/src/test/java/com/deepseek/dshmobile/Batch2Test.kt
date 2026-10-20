@@ -85,7 +85,7 @@ class Batch2Test {
     }
 
     @Test fun connectionWords() {
-        assertEquals("已连接电脑" to true, com.deepseek.dshmobile.ui.ConnectionWords.status(true, false, null, true))
+        assertEquals("已连接到电脑" to true, com.deepseek.dshmobile.ui.ConnectionWords.status(true, false, null, true))
         assertEquals("正在重新连接…" to false, com.deepseek.dshmobile.ui.ConnectionWords.status(true, true, null, true))
         assertEquals("暂时连不上电脑" to false, com.deepseek.dshmobile.ui.ConnectionWords.status(true, false, "x", false))
         assertEquals("没有连接电脑" to false, com.deepseek.dshmobile.ui.ConnectionWords.status(false, false, null, false))

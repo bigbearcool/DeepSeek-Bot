@@ -13,11 +13,11 @@ class LookTest {
         Calendar.getInstance().apply { set(y, m - 1, d, h, min, 0); set(Calendar.MILLISECOND, 0) }.timeInMillis
 
     @Test fun sameBotSameShapeAndColor() {
-        assertEquals(Look.shapeFor("bot-a"), Look.shapeFor("bot-a"))
-        assertEquals(Look.fallbackInk("bot-a"), Look.fallbackInk("bot-a"))
-        val shapes = (1..40).map { Look.shapeFor("bot-$it") }.toSet()
+        assertEquals(Look.defaultShape("bot-a"), Look.defaultShape("bot-a"))
+        assertEquals(Look.defaultColor("bot-a"), Look.defaultColor("bot-a"))
+        val shapes = (1..40).map { Look.defaultShape("bot-$it") }.toSet()
         assertTrue("shapes vary", shapes.size >= 4)
-        assertTrue(Look.FALLBACK_INKS.contains(Look.fallbackInk("x")))
+        assertTrue(Look.DEFAULT_COLORS.contains(Look.defaultColor("x")))
     }
 
     @Test fun clockWords() {

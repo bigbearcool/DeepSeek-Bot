@@ -16,6 +16,8 @@ export const DSBOT_ALLOWED = new Set([
   'state', 'models', 'efforts', 'folders', 'folder-list', 'create-bot', 'create-room', 'send',
   // stop a member's reply in a group; answer a group member's approval
   'stop-member-work', 'approval-answer',
+  // edit a Bot (name, label, instructions, look) or a group (name, members); ds-bot validates both
+  'update-bot', 'update-room',
   // read-only, for GET /diagnostics
   'room-progress',
 ])

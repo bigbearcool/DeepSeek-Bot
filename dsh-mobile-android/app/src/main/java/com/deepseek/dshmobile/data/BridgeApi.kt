@@ -164,6 +164,18 @@ class BridgeApi(
             postJson("/approvals/answer", JSONObject().put("id", id).put("choice", choice), accessToken)
         }
 
+        suspend fun botInfo(accessToken: String, id: String): BotProfile =
+            parseProfile(getJson("/bots/info?id=" + enc(id), accessToken).getJSONObject("bot"))
+
+        /** Change a Bot on the computer; ds-bot checks every value. */
+        suspend fun updateBot(accessToken: String, body: JSONObject): BotProfile =
+            parseProfile(postJson("/bots/update", body, accessToken).getJSONObject("bot"))
+
+        suspend fun addMembers(accessToken: String, roomId: String, ids: List<String>): RoomInfo =
+            parseRoom(postJson("/rooms/update", JSONObject().put("id", roomId).put("add", org.json.JSONArray(ids)), accessToken).getJSONObject("room"))
+
+        suspend fun search(accessToken: String, q: String): List<SearchHit> = parseHits(getJson("/search?q=" + enc(q), accessToken))
+
         private fun enc(v: String) = java.net.URLEncoder.encode(v, "UTF-8")
 
         fun streamUrl(botId: String? = null, test: Boolean = false, roomId: String? = null, since: Long? = null): String {

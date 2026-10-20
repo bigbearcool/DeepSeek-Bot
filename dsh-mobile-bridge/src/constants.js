@@ -1,5 +1,5 @@
 export const NAME = 'dsh-mobile-bridge'
-export const VERSION = '0.0.11'
+export const VERSION = '0.0.12'
 export const API_PREFIX = '/api/mobile-bridge/v1'
 
 /** Access token lifetime (ms). */
@@ -49,5 +49,7 @@ export const INK_HEX = {
   orange: '#FF781C', yellow: '#FFAF38', green: '#00C972', cyan: '#1CC3B0', blue: '#2A92FE',
   violet: '#A97EFE', magenta: '#FF5EB1', gray: '#959595', aurora: '#00B8D4',
 }
+/** ds-bot CHARACTER_COLORS (src/client/characters.js), in picker order: the 12 colors a Bot can take. */
+export const PICKER_COLORS = ['black', 'brown', 'red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'violet', 'magenta', 'gray', 'aurora']
 /** Limits the desktop form shows (create-bot.js maxLength 40, roster.js role 24, ROOM_NAME_MAX 60). */
 export const FORM_LIMITS = { name: 40, role: 24, roomName: 60, roomMinMembers: 2, roomMaxMembers: 12 }

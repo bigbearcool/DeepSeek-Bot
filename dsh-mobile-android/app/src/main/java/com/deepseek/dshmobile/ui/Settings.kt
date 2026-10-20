@@ -50,7 +50,7 @@ object ConnectionWords {
         !paired -> "没有连接电脑" to false
         reconnecting -> "正在重新连接…" to false
         notice != null && !loaded -> "暂时连不上电脑" to false
-        else -> "已连接电脑" to true
+        else -> "已连接到电脑" to true
     }
 
     /** Only the computer's name or address, without the scheme, path or port noise. */
@@ -85,7 +85,7 @@ fun SettingsScreen(
                     Spacer(Modifier.size(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(words, color = c.ink, fontSize = 16.sp)
-                        Text(ConnectionWords.host(state.baseUrl), color = c.ink3, fontSize = 13.sp)
+                        if (state.paired) Text(com.deepseek.dshmobile.data.ProfileLogic.network(state.baseUrl), color = c.ink3, fontSize = 13.sp)
                     }
                 }
             }
@@ -125,7 +125,7 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun GroupLabel(text: String) {
+internal fun GroupLabel(text: String) {
     val c = LocalDs.current
     Text(text, color = c.ink3, fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 2.dp))
 }

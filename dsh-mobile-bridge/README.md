@@ -169,3 +169,15 @@ All require the device Bearer token (401 without one).
 | `POST /approvals/answer` `{id, choice:'allow'\|'reject'}` | ds-bot `approval-answer` (validation in ds-bot) |
 
 A Bot's own-chat approval is `answerable: false`: ds-bot leaves it to dsh's own card.
+
+## Bot profile, group members, search (0.0.12)
+
+Every route needs the device Bearer token (401 without it). Writes go through ds-bot's own
+`POST /api/bot` handler, so ds-bot does all the checking; the bridge only picks which fields pass.
+
+| Route | What it does |
+|---|---|
+| `GET /bots/info?id=` | One Bot: name, role, color, shape, instructions, main; plus the 20 shapes and 12 colors. 404 for an unknown id. |
+| `POST /bots/update` | `{ id, name?, role?, instructions?, color?, shape? }` → ds-bot `update-bot`. `shape` becomes `avatar: { shape }`; `shape: null` / `color: null` reset to the default look. Other fields (model, main, …) are dropped. |
+| `POST /rooms/update` | `{ id, name?, add?: [botId], remove?: [botId] }` → ds-bot `update-room`. |
+| `GET /search?q=` | Message search over visible group logs and the last 100 items of each Bot chat; at most 30 hits `{ kind, id, name, who, text, seq }`. |

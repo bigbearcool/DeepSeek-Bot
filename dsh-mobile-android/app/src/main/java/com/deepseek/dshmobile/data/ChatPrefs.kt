@@ -17,6 +17,8 @@ data class ChatPrefs(
     val hidden: Map<String, Long> = emptyMap(),
     val unread: Set<String> = emptySet(),
     val theme: String = THEME_SYSTEM,
+    /** Chats whose 通知 switch is off: their new-message count shows gray instead of black. */
+    val muted: Set<String> = emptySet(),
 ) {
     companion object {
         const val THEME_SYSTEM = "system"
@@ -76,6 +78,7 @@ class ChatPrefsStore(private val context: Context) {
     private val hidden = stringSetPreferencesKey("hidden")
     private val unread = stringSetPreferencesKey("unread")
     private val theme = stringPreferencesKey("theme")
+    private val muted = stringSetPreferencesKey("muted")
 
     val flow: Flow<ChatPrefs> = context.prefsStore.data.map {
         ChatPrefs(
@@ -83,6 +86,7 @@ class ChatPrefsStore(private val context: Context) {
             hidden = ChatPrefsLogic.decodeHidden(it[hidden].orEmpty()),
             unread = it[unread].orEmpty(),
             theme = ChatPrefsLogic.normTheme(it[theme]),
+            muted = it[muted].orEmpty(),
         )
     }
 
@@ -92,6 +96,7 @@ class ChatPrefsStore(private val context: Context) {
             it[hidden] = ChatPrefsLogic.encodeHidden(p.hidden)
             it[unread] = p.unread
             it[theme] = p.theme
+            it[muted] = p.muted
         }
     }
 }

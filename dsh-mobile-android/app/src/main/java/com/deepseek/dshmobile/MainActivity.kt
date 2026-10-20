@@ -76,6 +76,9 @@ class MainActivity : ComponentActivity() {
             val state by vm.state.collectAsState()
             val dark = when (state.prefs.theme) { "light" -> false; "dark" -> true; else -> androidx.compose.foundation.isSystemInDarkTheme() }
             DsTheme(dark = dark) {
+              androidx.compose.runtime.CompositionLocalProvider(
+                  com.deepseek.dshmobile.ui.LocalBotShapes provides state.bots.associate { it.id to it.shape },
+              ) {
                 when (state.screen) {
                     Screen.Loading -> LoadingScreen()
                     Screen.Pair -> PairScreen(
@@ -107,6 +110,7 @@ class MainActivity : ComponentActivity() {
                         onTogglePin = vm::togglePin,
                         onToggleUnread = vm::toggleUnread,
                         onHide = vm::hideChat,
+                        onSearch = vm::openSearch,
                     )
                     Screen.Settings -> {
                         BackHandler { vm.closeSettings() }
@@ -156,9 +160,41 @@ class MainActivity : ComponentActivity() {
                             onRefresh = { vm.loadTeam() },
                             onReply = vm::setReply,
                             onAttach = vm::attachLater,
+                            onInfo = { val r = state.selectedRoom; if (r != null) vm.openGroupInfo() else state.selectedBot?.let { vm.openProfile(it.id) } },
                         )
                     }
+                    Screen.BotProfile -> {
+                        BackHandler { vm.closeProfile() }
+                        com.deepseek.dshmobile.ui.BotProfileScreen(
+                            state = state,
+                            onBack = vm::closeProfile,
+                            onShape = vm::setShape,
+                            onColor = vm::setColor,
+                            onReset = vm::resetLook,
+                            onText = vm::saveText,
+                            onMute = { state.profile?.let { vm.toggleMute("bot", it.id) } },
+                        )
+                    }
+                    Screen.GroupInfo -> {
+                        BackHandler { vm.closeGroupInfo() }
+                        com.deepseek.dshmobile.ui.GroupInfoScreen(
+                            state = state,
+                            onBack = vm::closeGroupInfo,
+                            onMember = vm::openProfile,
+                            onAdd = vm::openAddMember,
+                            onMute = { state.selectedRoom?.let { vm.toggleMute("room", it.id) } },
+                        )
+                    }
+                    Screen.AddMember -> {
+                        BackHandler { vm.closeAddMember() }
+                        com.deepseek.dshmobile.ui.AddMemberScreen(state, onClose = vm::closeAddMember, onToggle = vm::toggleAddPick, onAdd = vm::addMembers)
+                    }
+                    Screen.Search -> {
+                        BackHandler { vm.closeSearch() }
+                        com.deepseek.dshmobile.ui.SearchScreen(state, onClose = vm::closeSearch, onQuery = vm::onSearch, onOpen = vm::openHit)
+                    }
                 }
+              }
             }
         }
     }

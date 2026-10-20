@@ -69,6 +69,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
@@ -342,6 +344,7 @@ fun TeamScreen(
     onTogglePin: (ChatEntry) -> Unit = {},
     onToggleUnread: (ChatEntry) -> Unit = {},
     onHide: (ChatEntry) -> Unit = {},
+    onSearch: () -> Unit = {},
 ) {
     val c = LocalDs.current
     var add by remember { mutableStateOf(false) }
@@ -354,9 +357,7 @@ fun TeamScreen(
         ) {
             RoundButton(Icons.Filled.Person, "设置", onClick = onSettings)
             Spacer(Modifier.weight(1f))
-            RoundButton(if (searching) Icons.Filled.Close else Icons.Filled.Search, if (searching) "关闭搜索" else "搜索") {
-                searching = !searching; if (!searching) query = ""
-            }
+            RoundButton(Icons.Filled.Search, "搜索", onClick = onSearch)
             Spacer(Modifier.size(10.dp))
             Box {
                 RoundButton(Icons.Filled.Add, "新建", onClick = { add = true })
@@ -480,7 +481,8 @@ private fun ChatRow(
                     if (badge != null) {
                         Spacer(Modifier.size(8.dp))
                         Box(
-                            Modifier.height(20.dp).widthIn(min = 20.dp).clip(RoundedCornerShape(10.dp)).background(c.ink).padding(horizontal = 6.dp),
+                            Modifier.height(20.dp).widthIn(min = 20.dp).clip(RoundedCornerShape(10.dp))
+                                .background(if ("${chat.kind}:${chat.id}" in state.prefs.muted) c.ink3.copy(alpha = 0.6f) else c.ink).padding(horizontal = 6.dp),
                             contentAlignment = Alignment.Center,
                         ) { Text(badge, color = c.bg, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
                     } else if (handUnread) {
@@ -580,6 +582,7 @@ fun ChatScreen(
     onRefresh: () -> Unit = {},
     onReply: (ReplyTarget?) -> Unit = {},
     onAttach: (String) -> Unit = {},
+    onInfo: () -> Unit = {},
 ) {
     val c = LocalDs.current
     val list = rememberLazyListState()
@@ -609,7 +612,7 @@ fun ChatScreen(
             Spacer(Modifier.size(8.dp))
             Row(
                 Modifier.weight(1f, fill = false).height(36.dp).shadow(if (c.dark) 0.dp else 2.dp, RoundedCornerShape(18.dp), clip = false)
-                    .clip(RoundedCornerShape(18.dp)).background(c.card).padding(start = 6.dp, end = 14.dp),
+                    .clip(RoundedCornerShape(18.dp)).background(c.card).clickable(onClick = onInfo).padding(start = 6.dp, end = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val room = state.selectedRoom
@@ -622,7 +625,8 @@ fun ChatScreen(
             Box {
                 RoundButton(Icons.Filled.MoreHoriz, "更多", onClick = { menu = true })
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text("刷新", fontSize = 16.sp) }, onClick = { menu = false; onRefresh() })
+                    MenuRow(Icons.Outlined.Info, if (state.inRoom) "群聊信息" else "查看资料") { menu = false; onInfo() }
+                    MenuRow(Icons.Filled.Refresh, "刷新") { menu = false; onRefresh() }
                 }
             }
         }

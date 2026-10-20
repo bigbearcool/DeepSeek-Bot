@@ -4,17 +4,64 @@ import java.util.Calendar
 
 /** Pure helpers for the batch-1 look: avatar shapes, time words, voice text, list filter. */
 object Look {
-    /** Shapes a Bot avatar can take; the same Bot always gets the same one. */
-    enum class Shape { Circle, Drop, Hexagon, Triangle, Square, Pill, Arch }
+    // ---- Avatars: the same rules as ds-bot src/client/characters.js lookOf(), so a Bot looks
+    // the same on the phone as on the computer. A stored shape / color wins, then the Bot id.
 
-    private fun hash(key: String): Int = key.fold(7) { a, ch -> a * 31 + ch.code } and 0x7fffffff
+    /** ds-bot DEFAULT_SHAPES: what a Bot with no chosen shape gets. */
+    val DEFAULT_SHAPES = listOf("star", "moon", "gumdrop", "peanut", "bunny", "kitty", "acorn")
+    const val FALLBACK_SHAPE = "gumdrop"
+    /** ds-bot CHARACTER_COLORS in picker order (12). */
+    val PICKER_COLORS = listOf("black", "brown", "red", "orange", "yellow", "green", "cyan", "blue", "violet", "magenta", "gray", "aurora")
+    /** ds-bot DEFAULT_COLORS: never black, gray, brown or a gradient. */
+    val DEFAULT_COLORS = listOf("red", "orange", "yellow", "green", "cyan", "blue", "violet", "magenta")
+    /** Color ids ds-bot accepts (INKS keys); anything else falls back to the id's color. */
+    val INK_IDS = setOf("deepseek", "charcoal", "graphite", "rose", "sky", "tangerine", "cobalt") + PICKER_COLORS
 
-    fun shapeFor(key: String): Shape = Shape.entries[hash(key) % Shape.entries.size]
+    fun fnv1a(text: String): Int {
+        var value = -2128831035 // 2166136261
+        for (ch in text) value = (value xor ch.code) * 16777619
+        return value
+    }
 
-    /** Colors used when a Bot has none set on the computer (ds-bot ink ids). */
-    val FALLBACK_INKS = listOf("violet", "blue", "green", "orange", "magenta", "cyan", "yellow", "red", "brown", "cobalt")
+    fun defaultShape(id: String): String {
+        var v = fnv1a(id)
+        v = (v xor (v ushr 16)) * 73244475
+        v = (v xor (v ushr 13)) * -1028477387 // 3266489909
+        val u = (v xor (v ushr 16)).toLong() and 0xFFFFFFFFL
+        return DEFAULT_SHAPES[(u % DEFAULT_SHAPES.size).toInt()]
+    }
 
-    fun fallbackInk(key: String): String = FALLBACK_INKS[(hash(key) / 7) % FALLBACK_INKS.size]
+    fun defaultColor(id: String): String {
+        val t = fnv1a(id) + 1831565813
+        var n = (t xor (t ushr 15)) * (1 or t)
+        n = (n + (n xor (n ushr 7)) * (61 or n)) xor n
+        val u = (n xor (n ushr 14)).toLong() and 0xFFFFFFFFL
+        return DEFAULT_COLORS[((u.toDouble() / 4294967296.0) * DEFAULT_COLORS.size).toInt()]
+    }
+
+    fun isColor(color: String?): Boolean =
+        color != null && (Regex("^#[0-9a-fA-F]{6}$").matches(color) || color in INK_IDS || color in LEGACY_INKS)
+
+    private val LEGACY_INKS = setOf("kimi", "zai", "minimax", "stepfun", "mimo", "qwen")
+
+    /** ds-bot lookOf(): (shape, color) for a Bot id with what the computer stored. */
+    fun lookOf(id: String?, shape: String?, color: String?): Pair<String, String> {
+        val s = if (shape != null && Characters.BY_ID.containsKey(shape)) shape else if (!id.isNullOrEmpty()) defaultShape(id) else FALLBACK_SHAPE
+        val c = if (isColor(color)) color!! else if (!id.isNullOrEmpty()) defaultColor(id) else "black"
+        return s to c
+    }
+
+    /** Chinese names for the shapes, same as the bridge's list. */
+    val SHAPE_LABELS = mapOf(
+        "star" to "星星", "moon" to "月亮", "gumdrop" to "软糖", "peanut" to "花生", "bunny" to "兔子", "kitty" to "小猫",
+        "acorn" to "橡果", "whale" to "鲸鱼", "wave" to "浪花", "squircle" to "圆方", "zed" to "小牛", "hex" to "花朵",
+        "saucer" to "飞碟", "beacon" to "灯塔", "plus" to "十字", "magnet" to "磁铁", "pebbles" to "石子", "cushion" to "靠垫",
+        "ring" to "圆环", "gem" to "宝石",
+    )
+    val COLOR_LABELS = mapOf(
+        "black" to "黑", "brown" to "棕", "red" to "红", "orange" to "橙", "yellow" to "黄", "green" to "绿",
+        "cyan" to "青", "blue" to "蓝", "violet" to "紫", "magenta" to "品红", "gray" to "灰", "aurora" to "极光",
+    )
 
     /** 上午8:41 / 下午3:05 (no space, like Grok Bot) */
     fun clock(at: Long): String {

@@ -316,3 +316,21 @@ export class ListPrefs {
     return p;
   }
 }
+
+/** What a group chat is called on the phone: its own name, or its members with "You" shown as 我. */
+export function roomTitle(name: string, memberNames: string[]): string {
+  const fix = (parts: string[]): string => parts.map((x: string) => x.trim())
+    .filter((x: string) => x.length > 0)
+    .map((x: string) => x === 'You' || x === 'you' || x === 'User' ? '我' : x)
+    .join('、');
+  const n = name.trim();
+  if (n.length === 0) {
+    const t = fix(memberNames);
+    return t.length > 0 ? t : '群聊';
+  }
+  const parts = n.split(new RegExp('\\s*[,，、]\\s*'));
+  if (parts.length > 1 && parts.some((x: string) => x.trim() === 'You' || x.trim() === 'you')) {
+    return fix(parts);
+  }
+  return n;
+}

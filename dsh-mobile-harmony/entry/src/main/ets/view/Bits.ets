@@ -152,7 +152,7 @@ export struct CharAvatar {
     if (ch === null) {
       return;
     }
-    const k = c.width / 100;
+    const k = this.dim / 100;
     c.clearRect(0, 0, c.width, c.height);
     c.save();
     c.scale(k, k);
@@ -204,13 +204,17 @@ export struct CharAvatar {
   }
 
   build() {
-    Canvas(this.ctx)
-      .width(this.dim)
-      .height(this.dim)
-      .onReady(() => {
-        this.ready = true;
-        this.draw();
-      })
+    Stack() {
+      Canvas(this.ctx)
+        .width('100%')
+        .height('100%')
+        .onReady(() => {
+          this.ready = true;
+          this.draw();
+        })
+    }
+    .width(this.dim)
+    .height(this.dim)
   }
 }
 

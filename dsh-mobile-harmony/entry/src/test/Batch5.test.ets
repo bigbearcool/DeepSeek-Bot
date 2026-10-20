@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { Exchanges, ListPrefs, Looks } from '../main/ets/common/Look';
+import { Exchanges, ListPrefs, Looks, roomTitle } from '../main/ets/common/Look';
 import { CHARACTERS } from '../main/ets/common/Characters';
 import { ChatEntry, ChatItem, newItem } from '../main/ets/common/Models';
 import { LaunchRouter, StartRoute } from '../main/ets/common/ChatLogic';
@@ -112,6 +112,17 @@ export default function batch5Test() {
       expect(q.theme).assertEqual('dark');
       expect(ListPrefs.decode('').theme).assertEqual('system');
       expect(ListPrefs.normTheme('blue')).assertEqual('system');
+    });
+  });
+
+  describe('roomTitle', () => {
+    it('names', 0, () => {
+      expect(roomTitle('周会', ['You', '园长'])).assertEqual('周会');
+      expect(roomTitle('You, 园长, 小秘…', [])).assertEqual('我、园长、小秘…');
+      expect(roomTitle('You, 园长, 工匠', [])).assertEqual('我、园长、工匠');
+      expect(roomTitle('', ['You', '园长', '小秘'])).assertEqual('我、园长、小秘');
+      expect(roomTitle('', [])).assertEqual('群聊');
+      expect(roomTitle('猫, 狗', [])).assertEqual('猫, 狗');
     });
   });
 

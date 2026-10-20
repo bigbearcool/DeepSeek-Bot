@@ -16,6 +16,7 @@ import {
   ChatListLogic, ChatMerge, LaunchRouter, Look, StartRoute, WaitEvent, WaitKind, WaitMachine, WaitPhase, WaitState
 } from '../common/ChatLogic';
 import { AttImage, CharAvatar, ImageViewer, MdText, RoomAvatar } from '../view/Bits';
+import { roomTitle } from '../common/Look';
 import { COLOR_LABELS, Exchanges, ExRun, ListPrefs, Looks, PICKER_COLORS, SHAPE_LABELS } from '../common/Look';
 import { FolderListing, FolderOption, NamedOption } from '../common/Models';
 import { ConfigurationConstant } from '@kit.AbilityKit';
@@ -381,7 +382,17 @@ struct Index {
       const team = await this.auth.with((t: string, api: BridgeApi) => api.team(t));
       this.bots = team.bots;
       this.rooms = team.rooms;
-      let chats = ChatListLogic.sorted(list.chats);
+      let chats = ChatListLogic.sorted(list.chats).map((c: ChatEntry) => {
+        if (c.kind !== 'room') {
+          return c;
+        }
+        const r = team.rooms.find((x: RoomInfo) => x.id === c.id);
+        const n: ChatEntry = {
+          kind: c.kind, id: c.id, name: roomTitle(c.name, r === undefined ? c.members : r.memberNames), color: c.color,
+          main: c.main, preview: c.preview, lastAt: c.lastAt, unread: c.unread, running: c.running, members: c.members
+        };
+        return n;
+      });
       if (this.screen === 'chat') {
         chats = ChatListLogic.clearOpen(chats, this.openKind, this.openId);
       }
@@ -439,7 +450,7 @@ struct Index {
     }
     if (kind === 'room') {
       const r = this.rooms.find((x: RoomInfo) => x.id === id);
-      return r === undefined ? '群聊' : r.name;
+      return r === undefined ? '群聊' : roomTitle(r.name, r.memberNames);
     }
     const b = this.bots.find((x: BotInfo) => x.id === id);
     return b === undefined ? '助手' : b.name;

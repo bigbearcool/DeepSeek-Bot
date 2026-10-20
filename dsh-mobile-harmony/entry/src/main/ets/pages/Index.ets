@@ -17,7 +17,8 @@ import {
 } from '../common/ChatLogic';
 import { AttImage, Avatar, MdText, colorOf } from '../view/Bits';
 import { Files, PickedFile } from '../data/Files';
-import { AttachLogic, ProfileLogic } from '../common/Extra';
+import { AttachLogic, ChatPrefs, NotifyLogic, ProfileLogic, Seen } from '../common/Extra';
+import { Notifier } from '../data/Notifier';
 import { BotRules } from '../common/Group';
 import { Attachment, BotOptions, BotProfile, EffortOption, ModelOption, NewBotDraft, SearchHit } from '../common/Models';
 import { LiveReply, MentionActive, MentionRow, Mentions, RoomRound, RoomRules, RoomStreams } from '../common/Group';
@@ -73,6 +74,10 @@ struct Index {
   @State searchHits: SearchHit[] = [];
   @State formError: string = '';
   @StorageLink('foreground') foreground: boolean = true;
+  @StorageLink('openChat') @Watch('onOpenChat') openChatReq: string = '';
+  @State prefs: ChatPrefs = new ChatPrefs();
+  @State confirmRepair: boolean = false;
+  private seen: Seen | null = null;
   private store: SessionStore | null = null;
   private auth: Auth | null = null;
   private sse: SseClient = new SseClient();
@@ -119,6 +124,7 @@ struct Index {
     this.store = await SessionStore.open(this.ctx());
     this.auth = new Auth(this.store);
     const s = this.store.current();
+    this.prefs = ChatPrefs.decode(this.store.getPref('chat_prefs', ''));
     this.pairAddr = s.baseUrl.replace('/api/mobile-bridge/v1', '');
     const r = LaunchRouter.route(true, s.paired, s.lastChat);
     if (r === StartRoute.Pair) {
@@ -126,12 +132,55 @@ struct Index {
       return;
     }
     this.goList();
+    Notifier.ask(this.ctx());
+    if (this.openChatReq.length > 0) {
+      this.onOpenChat();
+      return;
+    }
     if (r === StartRoute.Chat) {
       const k = s.lastChat;
       const kind = k.startsWith('room:') ? 'room' : 'bot';
       const id = k.substring(k.indexOf(':') + 1);
       this.openChat(kind, id, '');
     }
+  }
+
+  onOpenChat(): void {
+    const k = this.openChatReq;
+    if (k.length === 0 || this.auth === null || !this.store?.current().paired) {
+      return;
+    }
+    this.openChatReq = '';
+    const kind = k.startsWith('room:') ? 'room' : 'bot';
+    this.openChat(kind, k.substring(k.indexOf(':') + 1), '');
+  }
+
+  private async savePrefs(p: ChatPrefs): Promise<void> {
+    this.prefs = p;
+    if (this.store !== null) {
+      await this.store.setPref('chat_prefs', p.encode());
+    }
+  }
+
+  private isMuted(kind: string, id: string): boolean {
+    return this.prefs.muted.indexOf(NotifyLogic.key(kind, id)) >= 0;
+  }
+
+  private toggleMute(kind: string, id: string): void {
+    this.savePrefs(this.prefs.withMuted(NotifyLogic.key(kind, id), !this.isMuted(kind, id)));
+  }
+
+  private async repair(): Promise<void> {
+    this.sse.close();
+    if (this.auth !== null) {
+      await this.auth.logout();
+    }
+    Notifier.clearAll();
+    this.chats = [];
+    this.approvals = [];
+    this.seen = null;
+    this.notice = '';
+    this.screen = 'pair';
   }
 
   // ---------- errors ----------
@@ -204,7 +253,7 @@ struct Index {
     this.refreshList();
     if (this.listTimer < 0) {
       this.listTimer = setInterval(() => {
-        if (this.foreground && (this.screen === 'list' || this.screen === 'chat')) {
+        if (this.screen !== 'pair' && this.screen !== 'loading') {
           this.refreshList();
         }
       }, 15000);
@@ -226,6 +275,12 @@ struct Index {
       }
       this.chats = chats;
       this.approvals = list.approvals;
+      const openKey = this.screen === 'chat' && this.foreground ? NotifyLogic.key(this.openKind, this.openId) : '';
+      const bundle = this.ctx().abilityInfo.bundleName;
+      for (const a of NotifyLogic.alerts(this.seen, list, this.prefs, openKey)) {
+        Notifier.show(bundle, a);
+      }
+      this.seen = NotifyLogic.seen(list);
       this.offline = false;
     } catch (e) {
       if (LaunchRouter.requiresRepair(e as Object)) {
@@ -250,6 +305,7 @@ struct Index {
     this.notice = '';
     this.screen = 'chat';
     this.chats = ChatListLogic.clearOpen(this.chats, kind, id);
+    Notifier.clear(kind, id);
     if (this.store !== null) {
       await this.store.setLastChat(kind + ':' + id);
     }
@@ -1002,6 +1058,9 @@ struct Index {
     Column() {
       Row() {
         Text('消息').fontSize(26).fontWeight(FontWeight.Bold).fontColor($r('app.color.text')).layoutWeight(1)
+        Text('设置').fontSize(16).fontColor($r('app.color.text')).padding(6).onClick(() => {
+          this.screen = 'settings';
+        })
         Text('搜索').fontSize(16).fontColor($r('app.color.text')).padding(6).onClick(() => this.openSearch())
         Text('＋').fontSize(26).fontColor($r('app.color.text')).padding(4)
           .bindMenu(this.menuOpen, this.PlusMenu, { onDisappear: () => this.menuOpen = false })
@@ -1150,6 +1209,8 @@ struct Index {
         Text('‹').fontSize(30).fontColor($r('app.color.text')).padding({ right: 8 }).onClick(() => this.closeChat())
         Text(this.openName).fontSize(18).fontWeight(FontWeight.Medium).fontColor($r('app.color.text'))
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+        Text(this.isMuted(this.openKind, this.openId) ? '已静音' : '提醒').fontSize(13)
+          .fontColor($r('app.color.sub')).padding(6).onClick(() => this.toggleMute(this.openKind, this.openId))
         if (this.openKind === 'bot') {
           Text('···').fontSize(20).fontColor($r('app.color.text')).padding(6)
             .onClick(() => this.openProfile(this.openId, 'chat'))
@@ -1627,6 +1688,70 @@ struct Index {
     .height('100%')
   }
 
+  @Builder
+  SettingsView() {
+    Column() {
+      this.TopBar('设置', () => {
+        this.screen = 'list';
+      })
+      Scroll() {
+        Column({ space: 10 }) {
+          Row() {
+            Text('连接方式').fontSize(15).fontColor($r('app.color.text')).layoutWeight(1)
+            Text(ProfileLogic.network(this.store?.current().baseUrl ?? '')).fontSize(14).fontColor($r('app.color.sub'))
+          }
+          .padding(12).borderRadius(12).backgroundColor($r('app.color.card')).width('100%')
+          Row() {
+            Text('新消息提醒').fontSize(15).fontColor($r('app.color.text')).layoutWeight(1)
+            Toggle({ type: ToggleType.Switch, isOn: this.prefs.notify }).onChange((on: boolean) => {
+              this.savePrefs(this.prefs.withNotify(on));
+              if (on) {
+                Notifier.ask(this.ctx());
+              }
+            })
+          }
+          .padding(12).borderRadius(12).backgroundColor($r('app.color.card')).width('100%')
+          Text('应用在后台久了会被系统暂停，这时收不到提醒，打开应用后会补上。').fontSize(12)
+            .fontColor($r('app.color.sub')).width('100%')
+          if (this.prefs.muted.length > 0) {
+            Text('已静音的会话').fontSize(13).fontColor($r('app.color.sub')).width('100%')
+            ForEach(this.prefs.muted, (k: string) => {
+              Row() {
+                Text(this.nameOf(k.startsWith('room:') ? 'room' : 'bot', k.substring(k.indexOf(':') + 1)))
+                  .fontSize(15).fontColor($r('app.color.text')).layoutWeight(1)
+                Text('取消静音').fontSize(13).fontColor($r('app.color.accent')).onClick(() => {
+                  this.savePrefs(this.prefs.withMuted(k, false));
+                })
+              }
+              .padding(12).borderRadius(12).backgroundColor($r('app.color.card')).width('100%')
+            }, (k: string) => k)
+          }
+          Button('重新配对').width('100%').height(44).backgroundColor('#E5484D').margin({ top: 20 })
+            .onClick(() => {
+              this.confirmRepair = true;
+            })
+          if (this.confirmRepair) {
+            Text('这台手机会断开，需要在电脑上重新扫码。').fontSize(13).fontColor($r('app.color.sub'))
+            Row({ space: 10 }) {
+              Button('取消').layoutWeight(1).backgroundColor('#8A8F99').onClick(() => {
+                this.confirmRepair = false;
+              })
+              Button('确定断开').layoutWeight(1).backgroundColor('#E5484D').onClick(() => {
+                this.confirmRepair = false;
+                this.repair();
+              })
+            }
+          }
+          Text('版本 0.1.0').fontSize(12).fontColor($r('app.color.sub')).margin({ top: 20 })
+        }
+        .padding(16)
+      }
+      .layoutWeight(1)
+    }
+    .width('100%')
+    .height('100%')
+  }
+
   build() {
     Column() {
       if (this.screen === 'loading') {
@@ -1635,6 +1760,8 @@ struct Index {
         this.PairView()
       } else if (this.screen === 'chat') {
         this.ChatView()
+      } else if (this.screen === 'settings') {
+        this.SettingsView()
       } else if (this.screen === 'profile') {
         this.ProfileView()
       } else if (this.screen === 'newbot') {

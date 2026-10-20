@@ -169,7 +169,7 @@ test('GET /diagnostics: token only; shows route, state file, ds-bot revision, ro
   await h.rt.feed.onRoomEvent(ROOM, REAL.relayResultFailed)
   const { status, body } = await h.json('GET', `/diagnostics?roomId=${ROOM}`, { headers })
   assert.equal(status, 200)
-  assert.equal(body.version, '0.0.17')
+  assert.equal(body.version, '0.0.18')
   assert.equal(body.dsbot.usable, true)
   assert.deepEqual(body.dsbot.dsbotRoute.methods, ['POST'])
   assert.equal(body.stateFile.exists, true)

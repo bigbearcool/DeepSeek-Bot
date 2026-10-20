@@ -84,53 +84,73 @@ export function createLiveFeed({ ctx, adapter, diag = { note() {} }, files = nul
     return { ...item, clientMessageId: hit.clientMessageId }
   }
 
-  // Subscribe once for the process; fan-out to connected phones.
-  if (typeof ctx.on === 'function') {
-    ctx.on('session/event', async (session, event) => {
-      if (event?.type === 'tool/call' || event?.type === 'tool/result') {
-        if (await onRoomEvent(session?.id, event)) return
-      }
-      if (clients.size === 0) return
-      const owners = await adapter.chatOwners()
-      const botId = owners.get(session.id)
-      if (botId === undefined) return
-      const state = await adapter.readState()
-      for (const item of displayItems(session.id, [event], state?.exchangeTurns ?? {})) {
-        publish('message', { botId, sessionId: session.id, item: claimPending(botId, shown(item)) }, { botId })
-      }
-      if (event.type === 'tool/call') bumpLive()
-    })
 
-    ctx.on('agent/status', async ({ agent }) => {
-      if (clients.size === 0) return
-      const owners = await adapter.chatOwners()
-      if (owners.has(agent.id)) bumpLive()
-    })
-
-    ctx.on('agent/assistant-stream', async ({ agent, frame }) => {
-      if (clients.size === 0) return
-      const owners = await adapter.chatOwners()
-      const botId = owners.get(agent.id)
-      if (botId === undefined) return
-      const state = await adapter.readState()
-      const hidden = new Set(state?.exchangeTurns?.[agent.id] ?? [])
-
-      if (frame.type === 'start') {
-        if (hidden.has(frame.turn)) return
-        writing.set(frame.attemptId, { botId, sessionId: agent.id })
-        publish('stream', { botId, sessionId: agent.id, attemptId: frame.attemptId, phase: 'start' }, { botId })
-        return
-      }
-      const target = writing.get(frame.attemptId)
-      if (target === undefined) return
-      if (frame.type === 'chunk' && frame.chunk?.type === 'text-delta') {
-        publish('stream', { ...target, attemptId: frame.attemptId, text: frame.chunk.text }, { botId: target.botId })
-      } else if (frame.type === 'end') {
-        writing.delete(frame.attemptId)
-        publish('stream', { ...target, attemptId: frame.attemptId, phase: 'end' }, { botId: target.botId })
+  /**
+   * cordis does not await async listeners. A rejected promise becomes unhandledRejection;
+   * dsh installFailLoud then process.exit(1) and the phone sees 5xx / connection refused.
+   * Swallow and note — never let a feed handler take down the host.
+   */
+  const safeOn = (event, handler) => {
+    if (typeof ctx.on !== 'function') return
+    ctx.on(event, (...args) => {
+      try {
+        const out = handler(...args)
+        if (out && typeof out.then === 'function') {
+          out.catch(err => {
+            try { diag.note('feed.error', { event, error: String(err?.message ?? err) }, { level: 'warn' }) } catch { /* */ }
+          })
+        }
+      } catch (err) {
+        try { diag.note('feed.error', { event, error: String(err?.message ?? err) }, { level: 'warn' }) } catch { /* */ }
       }
     })
   }
+
+  // Subscribe once for the process; fan-out to connected phones.
+  safeOn('session/event', async (session, event) => {
+    if (event?.type === 'tool/call' || event?.type === 'tool/result') {
+      if (await onRoomEvent(session?.id, event)) return
+    }
+    if (clients.size === 0) return
+    const owners = await adapter.chatOwners()
+    const botId = owners.get(session.id)
+    if (botId === undefined) return
+    const state = await adapter.readState()
+    for (const item of displayItems(session.id, [event], state?.exchangeTurns ?? {})) {
+      publish('message', { botId, sessionId: session.id, item: claimPending(botId, shown(item)) }, { botId })
+    }
+    if (event.type === 'tool/call') bumpLive()
+  })
+
+  safeOn('agent/status', async ({ agent }) => {
+    if (clients.size === 0) return
+    const owners = await adapter.chatOwners()
+    if (owners.has(agent.id)) bumpLive()
+  })
+
+  safeOn('agent/assistant-stream', async ({ agent, frame }) => {
+    if (clients.size === 0) return
+    const owners = await adapter.chatOwners()
+    const botId = owners.get(agent.id)
+    if (botId === undefined) return
+    const state = await adapter.readState()
+    const hidden = new Set(state?.exchangeTurns?.[agent.id] ?? [])
+
+    if (frame.type === 'start') {
+      if (hidden.has(frame.turn)) return
+      writing.set(frame.attemptId, { botId, sessionId: agent.id })
+      publish('stream', { botId, sessionId: agent.id, attemptId: frame.attemptId, phase: 'start' }, { botId })
+      return
+    }
+    const target = writing.get(frame.attemptId)
+    if (target === undefined) return
+    if (frame.type === 'chunk' && frame.chunk?.type === 'text-delta') {
+      publish('stream', { ...target, attemptId: frame.attemptId, text: frame.chunk.text }, { botId: target.botId })
+    } else if (frame.type === 'end') {
+      writing.delete(frame.attemptId)
+      publish('stream', { ...target, attemptId: frame.attemptId, phase: 'end' }, { botId: target.botId })
+    }
+  })
 
   // ---- group chats ----
   /** roomId → last log seq already published. */
@@ -238,34 +258,32 @@ export function createLiveFeed({ ctx, adapter, diag = { note() {} }, files = nul
 
   // A member writing its reply in its hidden group Session streams into the group chat.
   const roomWriting = new Map()
-  if (typeof ctx.on === 'function') {
-    ctx.on('agent/assistant-stream', async ({ agent, frame }) => {
-      if (roomClients() === 0) return
-      if (frame.type === 'start') {
-        const owner = (await adapter.groupOwners?.())?.get(agent.id)
-        if (!owner) {
-          // Not a member's group Session (or state.json does not know it yet).
-          const owned = (await adapter.chatOwners?.())?.has?.(agent.id)
-          if (!owned) diag.note('stream.miss', { sessionId: agent.id, attemptId: frame.attemptId })
-          return
-        }
-        diag.note('stream.start', { roomId: owner.roomId, botId: owner.botId, attemptId: frame.attemptId })
-        roomWriting.set(frame.attemptId, owner)
-        publish('stream', { roomId: owner.roomId, botId: owner.botId, name: owner.name, attemptId: frame.attemptId, phase: 'start' })
+  safeOn('agent/assistant-stream', async ({ agent, frame }) => {
+    if (roomClients() === 0) return
+    if (frame.type === 'start') {
+      const owner = (await adapter.groupOwners?.())?.get(agent.id)
+      if (!owner) {
+        // Not a member's group Session (or state.json does not know it yet).
+        const owned = (await adapter.chatOwners?.())?.has?.(agent.id)
+        if (!owned) diag.note('stream.miss', { sessionId: agent.id, attemptId: frame.attemptId })
         return
       }
-      const owner = roomWriting.get(frame.attemptId)
-      if (!owner) return
-      const base = { roomId: owner.roomId, botId: owner.botId, name: owner.name, attemptId: frame.attemptId }
-      if (frame.type === 'chunk' && frame.chunk?.type === 'text-delta') publish('stream', { ...base, text: frame.chunk.text })
-      else if (frame.type === 'end') {
-        roomWriting.delete(frame.attemptId)
-        diag.note('stream.end', { roomId: owner.roomId, botId: owner.botId, attemptId: frame.attemptId, outcome: frame.outcome?.kind ?? null })
-        publish('stream', { ...base, phase: 'end', ...(frame.outcome?.kind ? { outcome: frame.outcome.kind } : {}) })
-        void checkRooms()
-      }
-    })
-  }
+      diag.note('stream.start', { roomId: owner.roomId, botId: owner.botId, attemptId: frame.attemptId })
+      roomWriting.set(frame.attemptId, owner)
+      publish('stream', { roomId: owner.roomId, botId: owner.botId, name: owner.name, attemptId: frame.attemptId, phase: 'start' })
+      return
+    }
+    const owner = roomWriting.get(frame.attemptId)
+    if (!owner) return
+    const base = { roomId: owner.roomId, botId: owner.botId, name: owner.name, attemptId: frame.attemptId }
+    if (frame.type === 'chunk' && frame.chunk?.type === 'text-delta') publish('stream', { ...base, text: frame.chunk.text })
+    else if (frame.type === 'end') {
+      roomWriting.delete(frame.attemptId)
+      diag.note('stream.end', { roomId: owner.roomId, botId: owner.botId, attemptId: frame.attemptId, outcome: frame.outcome?.kind ?? null })
+      publish('stream', { ...base, phase: 'end', ...(frame.outcome?.kind ? { outcome: frame.outcome.kind } : {}) })
+      void checkRooms()
+    }
+  })
 
   function openStream(request, { device, botId = null, roomId = null, since = null, test = false } = {}) {
     let entry

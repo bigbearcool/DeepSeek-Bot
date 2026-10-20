@@ -13,13 +13,31 @@ const PAGE_SIZE = 60
 export function createDsBotAdapter({ dshHome, botHome, ctx, logger = console } = {}) {
   const statePath = join(botHome ?? join(dshHome, 'bot'), 'state.json')
 
+  /**
+   * Read ds-bot state.json. While a group round runs, ds-bot rewrites this file often;
+   * a concurrent read can catch a partial write and JSON.parse throws. An uncaught throw
+   * from an async cordis handler becomes an unhandledRejection; dsh's installFailLoud
+   * then process.exit(1) — which is how the phone saw "电脑端暂时出错" after group_relay.
+   * Retry briefly on SyntaxError; give up with null rather than throwing.
+   */
   async function readState() {
-    try {
-      return JSON.parse(await readFile(statePath, 'utf8'))
-    } catch (error) {
-      if (error?.code === 'ENOENT') return null
-      throw error
+    let last
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        return JSON.parse(await readFile(statePath, 'utf8'))
+      } catch (error) {
+        if (error?.code === 'ENOENT') return null
+        last = error
+        // Mid-write or transient I/O: wait and try again.
+        if (error instanceof SyntaxError || error?.code === 'EBUSY' || error?.code === 'EAGAIN') {
+          await new Promise(r => setTimeout(r, 15 * (attempt + 1)))
+          continue
+        }
+        throw error
+      }
     }
+    try { logger?.warn?.(`ds-bot state.json unreadable after retries: ${last?.message ?? last}`) } catch { /* */ }
+    return null
   }
 
   function sessionController() {

@@ -199,9 +199,14 @@ private fun InstructionsEditor(name: String, value: String, saving: Boolean, onC
 }
 
 @Composable
-fun GroupInfoScreen(state: UiState, onBack: () -> Unit, onMember: (String) -> Unit, onAdd: () -> Unit, onMute: () -> Unit) {
+fun GroupInfoScreen(
+    state: UiState, onBack: () -> Unit, onMember: (String) -> Unit, onAdd: () -> Unit, onMute: () -> Unit,
+    onRemove: (String) -> Unit = {}, onRename: (String) -> Unit = {},
+) {
     val c = LocalDs.current
     val room = state.selectedRoom ?: return
+    var removing by remember { mutableStateOf<String?>(null) }
+    var renaming by remember { mutableStateOf(false) }
     val muted = "room:${room.id}" in state.prefs.muted
     Column(Modifier.fillMaxSize().background(c.bg)) {
         TopRow(onClose = onBack)
@@ -211,8 +216,11 @@ fun GroupInfoScreen(state: UiState, onBack: () -> Unit, onMember: (String) -> Un
             }
             SheetCard {
                 Text(room.name, color = c.ink, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().padding(16.dp))
+                    modifier = Modifier.fillMaxWidth().clickable { renaming = true }.padding(16.dp))
             }
+            Spacer(Modifier.height(12.dp))
+            SheetCard { SheetRow(null, "修改群名称", onClick = { renaming = true }) }
+            state.formError?.let { Text(it, color = c.danger, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)) }
             GroupLabel("成员 · ${room.members.size}")
             SheetCard {
                 room.members.forEachIndexed { i, id ->
@@ -222,6 +230,8 @@ fun GroupInfoScreen(state: UiState, onBack: () -> Unit, onMember: (String) -> Un
                         Spacer(Modifier.size(12.dp))
                         Text(bot?.name ?: "助手", color = c.ink, fontSize = 16.sp, modifier = Modifier.weight(1f))
                         if (room.admin == id) Text("管理员", color = c.ink3, fontSize = 13.sp, modifier = Modifier.padding(end = 6.dp))
+                        else if (room.members.size > 1) Text("移除", color = c.danger, fontSize = 14.sp,
+                            modifier = Modifier.clip(RoundedCornerShape(14.dp)).clickable { removing = id }.padding(horizontal = 10.dp, vertical = 6.dp))
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = c.ink3)
                     }
                     if (i < room.members.size) Box(Modifier.fillMaxWidth().padding(start = 58.dp).height(1.dp).background(c.line))
@@ -240,6 +250,32 @@ fun GroupInfoScreen(state: UiState, onBack: () -> Unit, onMember: (String) -> Un
             }
             Spacer(Modifier.height(32.dp))
         }
+    }
+    removing?.let { id ->
+        val who = state.bots.find { it.id == id }?.name ?: "这个助手"
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { removing = null },
+            title = { Text("移除成员") },
+            text = { Text("把「$who」移出「${room.name}」？它不会再收到群里的消息。") },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { removing = null; onRemove(id) }) { Text("移除", color = c.danger) } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { removing = null }) { Text("取消", color = c.ink) } },
+            containerColor = c.card,
+        )
+    }
+    if (renaming) {
+        var name by remember { mutableStateOf(room.name) }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { renaming = false },
+            title = { Text("修改群名称") },
+            text = {
+                androidx.compose.material3.OutlinedTextField(name, { name = it.take(40) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(enabled = name.isNotBlank() && name.trim() != room.name, onClick = { renaming = false; onRename(name) }) { Text("保存", color = c.ink) }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { renaming = false }) { Text("取消", color = c.ink) } },
+            containerColor = c.card,
+        )
     }
 }
 

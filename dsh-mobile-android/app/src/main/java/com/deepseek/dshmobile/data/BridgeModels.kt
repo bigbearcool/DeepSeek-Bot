@@ -59,6 +59,8 @@ data class ChatItem(
     val local: Boolean = false,
     /** Group chat: the line was shortened on the computer. */
     val cut: Boolean = false,
+    /** Pictures and files in this message. */
+    val attachments: List<Attachment> = emptyList(),
 )
 
 data class HistoryResponse(

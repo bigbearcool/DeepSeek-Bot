@@ -97,7 +97,23 @@ export function createDsBotAdapter({ dshHome, botHome, ctx, logger = console } =
       err.status = 404
       throw err
     }
-    return { available: true, roomId, room: roomView(state, room), items: roomItems(room.log), seq: room.seq ?? null }
+    return { available: true, roomId, room: roomView(state, room), items: roomItems(room.log, await roomPictures(roomId)), seq: room.seq ?? null }
+  }
+
+  /** Picture refs the user sent into a group, read from the group's own Session (best effort). */
+  async function roomPictures(roomId) {
+    try {
+      // Same bounded read as the list preview (page refuses a bound past the live seq).
+      const { events } = await tail(roomId, 200)
+      const out = []
+      for (const event of events ?? []) {
+        if (event.type !== 'user/message') continue
+        for (const block of event.data?.content ?? []) if (block?.type === 'image' && block.attachment?.attachmentId) out.push(block.attachment)
+      }
+      return out
+    } catch {
+      return []
+    }
   }
 
   /** Map sessionId → botId for own chats (current + earlier segments). */
@@ -214,9 +230,9 @@ export function createDsBotAdapter({ dshHome, botHome, ctx, logger = console } =
     }
   }
 
-  async function send({ botId, text } = {}) {
+  async function send({ botId, text, parts = null } = {}) {
     const trimmed = String(text ?? '').trim()
-    if (!trimmed) {
+    if (!trimmed && !(parts?.length > 0)) {
       const err = new Error('text required')
       err.status = 400
       throw err
@@ -234,7 +250,7 @@ export function createDsBotAdapter({ dshHome, botHome, ctx, logger = console } =
         requestId: randomUUID(),
         sessionId: bot.sessionId,
         mode: 'queue',
-        content: [{ type: 'text', text: trimmed }],
+        content: [...(trimmed ? [{ type: 'text', text: trimmed }] : []), ...(typeof parts === 'function' ? parts(bot.sessionId) : parts ?? [])],
       }, AbortSignal.timeout(30_000))
       return { ok: true, botId, sessionId: bot.sessionId, via: 'sessionController.prompt' }
     }

@@ -8,6 +8,7 @@ import { createDiag } from './src/diag.js'
 import { createLiveFeed } from './src/live-feed.js'
 import { installRoutes } from './src/routes.js'
 import { startDeviceServer } from './src/device-server.js'
+import { createAttachments } from './src/attachments.js'
 
 export const name = NAME
 export const inject = ['connection', 'sessionController']
@@ -30,7 +31,8 @@ export function createRuntime(ctx, config = {}) {
   const botHome = config.botHome ?? join(dshHome, 'bot')
   const adapter = createDsBotAdapter({ dshHome, botHome, ctx })
   const diag = createDiag({ logger: ctx.logger, name: NAME, ...(config.quietDiag ? { print: null } : {}) })
-  const feed = createLiveFeed({ ctx, adapter, diag })
+  const attachments = createAttachments({ ctx })
+  const feed = createLiveFeed({ ctx, adapter, diag, files: attachments })
   const rt = {
     ctx,
     config,
@@ -42,6 +44,7 @@ export function createRuntime(ctx, config = {}) {
     diag,
     feed,
     dsbot: createDsBotApi({ ctx }),
+    attachments,
   }
   installRoutes(rt)
   // devicePort: false disables the standalone device listener.

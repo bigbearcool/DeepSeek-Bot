@@ -181,3 +181,12 @@ Every route needs the device Bearer token (401 without it). Writes go through ds
 | `POST /bots/update` | `{ id, name?, role?, instructions?, color?, shape? }` → ds-bot `update-bot`. `shape` becomes `avatar: { shape }`; `shape: null` / `color: null` reset to the default look. Other fields (model, main, …) are dropped. |
 | `POST /rooms/update` | `{ id, name?, add?: [botId], remove?: [botId] }` → ds-bot `update-room`. |
 | `GET /search?q=` | Message search over visible group logs and the last 100 items of each Bot chat; at most 30 hits `{ kind, id, name, who, text, seq }`. |
+
+## Pictures and files (0.0.13)
+
+All need the device token (401 without it).
+
+- `POST /uploads?kind=bot|room&id=<botId|roomId>&name=<file name>` — raw bytes (`application/octet-stream`, at most 25 MB, 413 above). Pictures (PNG/JPEG/GIF/WebP, recognised by their bytes) are held for 10 minutes and later sent as the same inline `image` prompt part the desktop sends; any other file goes through dsh's own `fileUploads.uploadStream` (the service behind `/api/session/uploadFileBinary`) and is cited by its receipt, bound to that Bot's current session or to the group. Returns `{ uploadId, type, name, bytes }`.
+- `POST /chats/send` and `/rooms/send` take `attachments: [uploadId…]`; text may be empty then. An upload made for another chat, already used or expired is refused with 400 「附件已过期，请重新添加」. A group message with attachments is queued on the group's session the way the desktop does; without attachments it still goes through ds-bot `send`.
+- Message items (history, live stream) carry `attachments: [{ type, id, name, bytes, mediaType, width, height }]`. Group lines show files and pictures from ds-bot's `[File …]` / `[Image …]` lines; pictures are matched to the group session's stored refs.
+- `GET /attachments?id=<id>` — the bytes, only for an id this bridge has already shown to a phone.

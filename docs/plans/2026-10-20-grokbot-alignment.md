@@ -259,3 +259,12 @@ Bot 资料/编辑/删除、群聊资料、固定流程（Routine）、插件、�
 - 已装 0.1.6 debug 包并截到配对页：`docs/plans/screens/0.1.6-pair-emulator.png`。
 - 启动命令：`$SDK/emulator/emulator -avd dshmb34 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect &`；截图：`$SDK/platform-tools/adb exec-out screencap -p > x.png`；启动 App 要用 `am start -n com.deepseek.dshmobile.debug/com.deepseek.dshmobile.MainActivity`（monkey 启动不了）。
 - 限制：模拟器连不到 NAS，后面的页面截图要在 Mac 上起一个临时 dsh + 插件来配对。
+
+### A.6 第四批（App 0.2.0 / versionCode 11，bridge 0.0.13）
+
+- **附件**：「+」里的 选择文件 / 拍照 / 附加图片 现在都能用。选好后立刻传到电脑（输入框上方显示缩略图或文件卡，带 ✕ 和上传中的转圈），传完才能发；只发图片或文件、不打字也行。一条最多 9 个，单个最大 25 MB。拍照首次会请求相机权限。
+- **和电脑端同一条路**：图片作为 `image` 内容块随这条消息发出（和桌面拖图一样，dsh 自己检查类型、大小、像素）；其他文件走 dsh `fileUploads.uploadStream`（桌面 `/api/session/uploadFileBinary` 背后的服务）拿回执再引用，回执绑定这个 Bot 当前会话或这个群。群里带附件的消息按桌面方式排进群的会话，ds-bot 照常把图片读成文字、把文件写成 `[File …]` 行给成员。
+- **气泡**：图片显示缩略图（单张按原比例，多张三列方格），点开全屏黑底、双指缩放；文件显示文档图标 + 文件名 + 类型 · 大小（对照真机 22_profile_tab_files 的文件行），点开交给手机里能打开它的应用。只有已经显示给手机的附件才能取回。
+- **「N 条消息，与 [头像] K 个 Bot」**：Bot 自己聊天里连续的 Bot 间来往（请求 / 回复 / 汇报）折成一行灰字，点开展开、再点收起（对照 03_chat_xiaomi）。群聊里不折。
+- **群聊信息**：成员行右侧「移除」（管理员不显示，先确认），群名可点或点「修改群名称」改名；都走 bridge `/rooms/update`（ds-bot update-room）。
+- 对照图：`/workspace/batch4/`（box）；原图：`docs/plans/screens/batch4/`。

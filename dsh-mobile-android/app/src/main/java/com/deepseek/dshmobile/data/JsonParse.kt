@@ -93,6 +93,7 @@ fun parseChatItem(o: JSONObject) = ChatItem(
     images = if (o.has("images")) o.optInt("images") else null,
     clientMessageId = o.optStringOrNull("clientMessageId"),
     cut = o.optBoolean("cut", false),
+    attachments = o.optJSONArray("attachments")?.mapObjects()?.map { parseAttachment(it) }.orEmpty(),
 )
 
 fun cursorToQuery(cursor: Any?): String? = when (cursor) {

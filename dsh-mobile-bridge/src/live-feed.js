@@ -13,7 +13,9 @@ const encoder = new TextEncoder()
  * hello, revision (n/a without ds-bot rt), live, message, stream
  * plus optional test ticks when mode=test.
  */
-export function createLiveFeed({ ctx, adapter, diag = { note() {} } }) {
+export function createLiveFeed({ ctx, adapter, diag = { note() {} }, files = null }) {
+  // Attachment refs in live items become openable, and the bridge-only part is dropped.
+  const shown = item => { if (item?.attachments) files?.remember([item]); if (item?.attachments) item.attachments = item.attachments.map(({ _ref, ...rest }) => rest); return item }
   /** @type {Set<{controller, botId: string|null, test: boolean}>} */
   const clients = new Set()
 
@@ -94,7 +96,7 @@ export function createLiveFeed({ ctx, adapter, diag = { note() {} } }) {
       if (botId === undefined) return
       const state = await adapter.readState()
       for (const item of displayItems(session.id, [event], state?.exchangeTurns ?? {})) {
-        publish('message', { botId, sessionId: session.id, item: claimPending(botId, item) }, { botId })
+        publish('message', { botId, sessionId: session.id, item: claimPending(botId, shown(item)) }, { botId })
       }
       if (event.type === 'tool/call') bumpLive()
     })
@@ -170,7 +172,7 @@ export function createLiveFeed({ ctx, adapter, diag = { note() {} } }) {
       for (const line of log) {
         if (!(line.seq > seen)) continue
         diag.note('poll.line', { roomId, seq: line.seq, who: line.botId ? 'member' : line.who === 'User' ? 'user' : 'other', ...(line.kind ? { lineKind: line.kind } : {}) })
-        const item = roomItem(line)
+        const item = shown(roomItem(line))
         if (item) publish('message', { roomId, item: claimPending(`room:${roomId}`, item) })
       }
       roomSeen.set(roomId, Math.max(seen, room.seq ?? 0, log.at(-1)?.seq ?? 0))
@@ -185,7 +187,7 @@ export function createLiveFeed({ ctx, adapter, diag = { note() {} } }) {
     if (!Array.isArray(log)) return
     const lines = log.filter(line => line.seq > since)
     for (const line of lines) {
-      const item = roomItem(line)
+      const item = shown(roomItem(line))
       if (item) send(entry, encoder.encode(`event: message\ndata: ${JSON.stringify({ roomId, item, catchUp: true })}\n\n`))
     }
     if (lines.length) diag.note('catchup', { roomId, since, lines: lines.length })

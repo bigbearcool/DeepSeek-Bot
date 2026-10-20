@@ -106,7 +106,14 @@ data class UiState(
     val searchHits: List<com.deepseek.dshmobile.data.SearchHit> = emptyList(),
     val searchingMessages: Boolean = false,
     val addPicked: Set<String> = emptySet(),
+    // batch 4: pictures and files
+    val pending: List<com.deepseek.dshmobile.data.PendingAttachment> = emptyList(),
+    /** Picture open full screen. */
+    val viewer: com.deepseek.dshmobile.data.Attachment? = null,
+    /** Exchange runs the user opened, by the seq/time of their first item. */
+    val expanded: Set<String> = emptySet(),
 ) {
+    val canSend: Boolean get() = com.deepseek.dshmobile.data.AttachLogic.canSend(composeText, pending) && !sending
     val openKind: String? get() = when { selectedRoom != null -> "room"; selectedBot != null -> "bot"; else -> null }
     val openId: String? get() = selectedRoom?.id ?: selectedBot?.id
     /** The computer says a reply is running in the open chat. */
@@ -293,7 +300,118 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun closeSettings() = _state.update { it.copy(screen = Screen.Team) }
     fun setReply(r: ReplyTarget?) = _state.update { it.copy(replyTo = r) }
-    fun attachLater(kind: String) = _state.update { it.copy(notice = "发送文件和图片下一版就能用") }
+    // ---- batch 4: pictures and files ----
+    private val images = android.util.LruCache<String, android.graphics.Bitmap>(24)
+
+    /** Picked pictures/files go to the computer right away, so sending is quick. */
+    fun addPicked(uris: List<android.net.Uri>, forceName: String? = null) {
+        val st = _state.value
+        val kind = st.openKind ?: return
+        val id = st.openId ?: return
+        val cr = getApplication<Application>().contentResolver
+        for (uri in uris) {
+            val count = _state.value.pending.size
+            var name = forceName ?: "文件"
+            var size = -1L
+            runCatching {
+                cr.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME, android.provider.OpenableColumns.SIZE), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) {
+                        if (forceName == null) c.getString(0)?.let { name = it }
+                        if (!c.isNull(1)) size = c.getLong(1)
+                    }
+                }
+            }
+            val type = cr.getType(uri).orEmpty()
+            val isImage = type.startsWith("image/") || forceName != null
+            com.deepseek.dshmobile.data.AttachLogic.problem(if (size < 0) 1 else size, count)?.let { p -> showNotice(p); return }
+            val p = com.deepseek.dshmobile.data.PendingAttachment("p-" + UUID.randomUUID(), uri.toString(), name, isImage, maxOf(size, 0))
+            _state.update { it.copy(pending = it.pending + p) }
+            viewModelScope.launch {
+                runCatching {
+                    val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        cr.openInputStream(uri)?.use { it.readBytes() } ?: error("unreadable")
+                    }
+                    if (bytes.size > com.deepseek.dshmobile.data.AttachLogic.MAX_BYTES) throw BridgeError("too_large", 413, "文件太大了，最多 25 MB")
+                    auth.withAccess { token, api -> api.upload(token, kind, id, name, bytes) } to bytes.size.toLong()
+                }.onSuccess { (r, n) ->
+                    _state.update { s -> s.copy(pending = s.pending.map { if (it.localId == p.localId) it.copy(uploadId = r.uploadId, bytes = n) else it }) }
+                }.onFailure { e ->
+                    if (e is CancellationException) throw e
+                    _state.update { s -> s.copy(pending = s.pending.filterNot { it.localId == p.localId }, notice = "没能添加「$name」：" + friendly(e)) }
+                }
+            }
+        }
+    }
+
+    fun removePending(localId: String) = _state.update { s -> s.copy(pending = s.pending.filterNot { it.localId == localId }) }
+    fun openViewer(a: com.deepseek.dshmobile.data.Attachment?) = _state.update { it.copy(viewer = a) }
+    fun toggleExpanded(key: String) = _state.update { it.copy(expanded = if (key in it.expanded) it.expanded - key else it.expanded + key) }
+
+    /** A picture in a message, scaled to at most [max] px on its long side; cached. */
+    suspend fun picture(a: com.deepseek.dshmobile.data.Attachment, max: Int): android.graphics.Bitmap? {
+        val key = (a.id ?: a.localUri ?: return null) + "@" + max
+        images.get(key)?.let { return it }
+        val bytes = runCatching {
+            if (a.localUri != null) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                getApplication<Application>().contentResolver.openInputStream(android.net.Uri.parse(a.localUri))?.use { it.readBytes() }
+            } else auth.withAccess { token, api -> api.attachmentBytes(token, a.id!!) }
+        }.getOrElse { e -> if (e is CancellationException) throw e; null } ?: return null
+        val bmp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
+            var sample = 1
+            while (maxOf(o.outWidth, o.outHeight) / (sample * 2) >= max) sample *= 2
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+        } ?: return null
+        images.put(key, bmp)
+        return bmp
+    }
+
+    /** Opens a file from a message in another app on the phone. */
+    fun openFile(a: com.deepseek.dshmobile.data.Attachment) {
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            runCatching {
+                val uri = if (a.localUri != null) android.net.Uri.parse(a.localUri) else {
+                    val bytes = auth.withAccess { token, api -> api.attachmentBytes(token, a.id ?: error("gone")) }
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        val dir = java.io.File(app.cacheDir, "open/" + a.id!!.takeLast(12)).apply { mkdirs() }
+                        val f = java.io.File(dir, (a.name ?: "文件").replace('/', '_'))
+                        f.writeBytes(bytes)
+                        androidx.core.content.FileProvider.getUriForFile(app, app.packageName + ".files", f)
+                    }
+                }
+                val type = a.mediaType ?: android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(a.name?.substringAfterLast('.', "")?.lowercase()) ?: "*/*"
+                val view = android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(uri, type)
+                    .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                app.startActivity(android.content.Intent.createChooser(view, a.name ?: "打开文件").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.onFailure { e ->
+                if (e is CancellationException) throw e
+                showNotice(if (e is android.content.ActivityNotFoundException) "手机上没有能打开这个文件的应用" else "没能打开文件：" + friendly(e))
+            }
+        }
+    }
+
+    // ---- batch 4: remove member, rename group ----
+    fun removeMember(botId: String) = changeRoom(remove = listOf(botId))
+    fun renameRoom(name: String) { if (name.isNotBlank()) changeRoom(name = name.trim()) }
+    private fun changeRoom(name: String? = null, remove: List<String> = emptyList()) {
+        val room = _state.value.selectedRoom ?: return
+        if (_state.value.saving) return
+        _state.update { it.copy(saving = true, formError = null) }
+        viewModelScope.launch {
+            runCatching { auth.withAccess { token, api -> api.updateRoom(token, room.id, name, remove) } }
+                .onSuccess { r ->
+                    _state.update { s ->
+                        val next = (s.selectedRoom ?: room).copy(name = r.name.ifBlank { name ?: room.name }, members = r.members.ifEmpty { room.members - remove.toSet() })
+                        s.copy(saving = false, selectedRoom = next, rooms = s.rooms.map { if (it.id == next.id) next else it },
+                            chats = s.chats.map { if (it.kind == "room" && it.id == next.id) it.copy(name = next.name) else it })
+                    }
+                    loadTeam()
+                }
+                .onFailure { e -> if (e is CancellationException) throw e; _state.update { it.copy(saving = false, formError = friendly(e)) } }
+        }
+    }
 
     /** Sends the typed text; when answering a message, the quote goes first. */
     fun sendWithReply() {
@@ -501,7 +619,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             it.copy(
                 screen = Screen.Chat,
                 selectedBot = bot,
-                selectedRoom = null,
+                selectedRoom = null, pending = emptyList(), expanded = emptySet(),
                 live = emptyList(),
                 messages = emptyList(),
                 nextCursor = null,
@@ -521,7 +639,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { markOpenRead(); refreshChats() }
         viewModelScope.launch { store.setLastBotId(null) }
         _state.update {
-            it.copy(screen = Screen.Team, selectedBot = null, selectedRoom = null, live = emptyList(), messages = emptyList(), wait = WaitState(), formError = null, replyTo = null)
+            it.copy(screen = Screen.Team, selectedBot = null, selectedRoom = null, live = emptyList(), messages = emptyList(), wait = WaitState(), formError = null, replyTo = null, pending = emptyList(), expanded = emptySet())
         }
         if (!_state.value.teamLoaded) loadTeam()
     }
@@ -554,22 +672,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val st = st0
         val bot = st.selectedBot ?: return
         val text = st.composeText.trim()
-        if (text.isEmpty() || st.sending) return // guard double tap / IME + button
+        if (!st.canSend) return // guard double tap / IME + button, and uploads still going
+        val picked = st.pending
         val clientId = "m-" + UUID.randomUUID().toString()
         _state.update {
             it.copy(
-                composeText = "",
+                composeText = "", pending = emptyList(),
                 sending = true,
                 notice = null,
                 messages = it.messages + ChatItem(
                     kind = "user", text = text, time = System.currentTimeMillis(),
-                    clientMessageId = clientId, local = true,
+                    clientMessageId = clientId, local = true, attachments = picked.map { p -> p.asAttachment() },
                 ),
                 wait = WaitMachine.reduce(it.wait, WaitEvent.Submitted(clientId)),
             )
         }
         viewModelScope.launch {
-            runCatching { auth.withAccess { token, api -> api.send(token, bot.id, text, clientId) } }
+            runCatching { auth.withAccess { token, api -> api.send(token, bot.id, text, clientId, picked.mapNotNull { it.uploadId }) } }
                 .onSuccess { res ->
                     _state.update {
                         if (res.ok) it.copy(sending = false)
@@ -672,7 +791,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         stopStream()
         _state.update {
             it.copy(
-                screen = Screen.Chat, selectedRoom = room, selectedBot = null, live = emptyList(),
+                screen = Screen.Chat, selectedRoom = room, selectedBot = null, live = emptyList(), pending = emptyList(), expanded = emptySet(),
                 messages = emptyList(), nextCursor = null, wait = WaitState(), notice = null,
             )
         }
@@ -698,17 +817,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         val room = st.selectedRoom ?: return
         val text = st.composeText.trim()
-        if (text.isEmpty() || st.sending) return
+        if (!st.canSend) return
+        val picked = st.pending
         val clientId = "m-" + UUID.randomUUID().toString()
         _state.update {
             it.copy(
-                composeText = "", sending = true, notice = null,
-                messages = it.messages + ChatItem(kind = "user", text = text, time = System.currentTimeMillis(), clientMessageId = clientId, local = true),
+                composeText = "", sending = true, notice = null, pending = emptyList(),
+                messages = it.messages + ChatItem(kind = "user", text = text, time = System.currentTimeMillis(), clientMessageId = clientId, local = true, attachments = picked.map { p -> p.asAttachment() }),
                 wait = WaitMachine.reduce(it.wait, WaitEvent.Submitted(clientId)),
             )
         }
         viewModelScope.launch {
-            runCatching { auth.withAccess { token, api -> api.roomSend(token, room.id, text, clientId) } }
+            runCatching { auth.withAccess { token, api -> api.roomSend(token, room.id, text, clientId, picked.mapNotNull { it.uploadId }) } }
                 .onSuccess { _state.update { it.copy(sending = false) } }
                 .onFailure { e ->
                     if (e is CancellationException) throw e

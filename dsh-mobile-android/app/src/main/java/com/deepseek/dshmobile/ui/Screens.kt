@@ -593,6 +593,17 @@ fun ChatScreen(
         if (count > 0 && n > 0) list.animateScrollToItem(n - 1)
     }
     val dividers = remember(state.messages) { Look.dividers(state.messages.map { it.time }) }
+    // A Bot's own chat folds its talk with other Bots into 「N 条消息…」 lines.
+    val runAt = remember(state.messages, state.inRoom) {
+        if (state.inRoom) emptyMap() else com.deepseek.dshmobile.data.Exchanges.runs(state.messages)
+            .flatMap { r -> (r.start until r.start + r.count).map { it to r } }.toMap()
+    }
+    val runKeyOf = { r: com.deepseek.dshmobile.data.Exchanges.Run -> state.messages[r.start].let { (it.seq ?: it.time ?: r.start).toString() } }
+    val shownIdx = remember(state.messages, runAt, state.expanded) {
+        state.messages.indices.filter { i -> runAt[i]?.let { r -> r.start == i || runKeyOf(r) in state.expanded } ?: true }
+    }
+    val attachUi = LocalAttach.current
+    val LocalAttachToggle = attachUi.toggleRun
     val colorOf = { id: String? -> id?.let { i -> state.bots.find { it.id == i }?.color } }
     var menu by remember { mutableStateOf(false) }
     var sheetFor by remember { mutableStateOf<ChatItem?>(null) }
@@ -651,9 +662,15 @@ fun ChatScreen(
                     textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 80.dp),
                 )
             }
-            itemsIndexed(state.messages) { i, m ->
+            items(shownIdx) { i ->
+                val m = state.messages[i]
+                val run = runAt[i]
+                val runKey = run?.let { runKeyOf(it) }
+                val folded = run != null && runKey !in state.expanded
                 Column {
                     dividers[i]?.let { TimeDivider(it) }
+                    if (run != null && i == run.start) ExchangeLine(run, !folded, colorOf) { LocalAttachToggle(runKey!!) }
+                    if (folded) return@Column
                     val prev = state.messages.getOrNull(i - 1)
                     val next = state.messages.getOrNull(i + 1)
                     val firstOfRun = m.kind == "member" && (prev?.kind != "member" || prev.botId != m.botId || dividers[i] != null)
@@ -679,12 +696,15 @@ fun ChatScreen(
             }
         }
         state.replyTo?.let { r -> ReplyChip(r, onClose = { onReply(null) }) }
+        PendingStrip(state.pending)
         Composer(
             state.composeText, state.sending, onComposeChange, onSend,
             hint = Look.inputHint(if (state.inRoom) state.chatTitle else state.selectedBot?.name, state.inRoom),
             showStop = state.showStop, stopping = state.stopping, onStop = onStop, onVoice = onVoice, onAttach = onAttach,
+            hasAttachments = state.pending.isNotEmpty(), uploading = state.pending.any { !it.ready },
         )
     }
+    state.viewer?.let { v -> ImageViewer(v, attachUi.closeViewer) }
     sheetFor?.let { m ->
         val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         val scope = rememberCoroutineScope()
@@ -828,13 +848,18 @@ private fun BotBubble(text: String, modifier: Modifier = Modifier, maxFraction: 
 private fun MessageRow(item: ChatItem, colorOf: (String?) -> String?, firstOfRun: Boolean, lastOfRun: Boolean, onLongPress: () -> Unit) {
     val c = LocalDs.current
     when (item.kind) {
-        "member" -> MemberBubble(
+        "member" -> Column {
+          if (item.attachments.isNotEmpty()) Box(Modifier.padding(start = 34.dp, top = if (firstOfRun) 8.dp else 0.dp)) { AttachmentList(item.attachments, alignEnd = false) }
+          if (!item.text.isNullOrBlank() || item.attachments.isEmpty()) MemberBubble(
             item.name ?: "助手", item.botId,
             item.text.orEmpty() + if (item.cut) "\n\n（内容较长，完整内容请在电脑上查看）" else "",
-            colorOf(item.botId), showName = firstOfRun, showAvatar = lastOfRun, onLongPress = onLongPress,
-        )
-        "user", "answer" -> BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.CenterEnd) {
-            val (quote, body) = Look.splitQuote(item.text.orEmpty())
+            colorOf(item.botId), showName = firstOfRun && item.attachments.isEmpty(), showAvatar = lastOfRun, onLongPress = onLongPress,
+          )
+        }
+        "user", "answer" -> Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+          AttachmentList(item.attachments, alignEnd = true)
+          val (quote, body) = Look.splitQuote(item.text.orEmpty())
+          if (body.isNotBlank() || quote != null || item.attachments.isEmpty()) BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
             Column(
                 Modifier.widthIn(max = maxWidth * 0.8f).clip(RoundedCornerShape(18.dp)).background(c.user)
                     .combinedClickable(onClick = {}, onLongClick = onLongPress)
@@ -848,10 +873,11 @@ private fun MessageRow(item: ChatItem, colorOf: (String?) -> String?, firstOfRun
                     }
                 }
                 Text(
-                    body + (if ((item.images ?: 0) > 0) "  [图片×${item.images}]" else ""),
+                    body + (if ((item.images ?: 0) > 0 && item.attachments.isEmpty()) "  [图片×${item.images}]" else ""),
                     color = c.userInk, fontSize = 16.sp, lineHeight = 22.sp,
                 )
             }
+          }
         }
         "bot" -> BotBubble(item.text.orEmpty(), onLongPress = onLongPress)
         else -> {
@@ -958,10 +984,12 @@ private fun Composer(
     hint: String,
     showStop: Boolean = false, stopping: Boolean = false, onStop: () -> Unit = {}, onVoice: () -> Unit = {},
     onAttach: (String) -> Unit = {},
+    hasAttachments: Boolean = false,
+    uploading: Boolean = false,
 ) {
     val c = LocalDs.current
-    val canSend = text.isNotBlank() && !sending
-    val stopMode = showStop && text.isBlank() && !sending
+    val canSend = (text.isNotBlank() || hasAttachments) && !uploading && !sending
+    val stopMode = showStop && text.isBlank() && !hasAttachments && !sending
     var plus by remember { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().background(c.bg).navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -999,7 +1027,7 @@ private fun Composer(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            if (text.isEmpty() && !sending) Box(
+            if (text.isEmpty() && !sending && !hasAttachments) Box(
                 Modifier.size(36.dp).clip(CircleShape).clickable(onClick = onVoice),
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.Filled.Mic, "说话输入", tint = c.ink3, modifier = Modifier.size(20.dp)) }

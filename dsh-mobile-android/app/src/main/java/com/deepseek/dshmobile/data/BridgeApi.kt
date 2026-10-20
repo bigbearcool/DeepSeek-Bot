@@ -95,8 +95,9 @@ class BridgeApi(
             )
         }
 
-        suspend fun send(accessToken: String, botId: String, text: String, clientMessageId: String? = null): SendResponse {
+        suspend fun send(accessToken: String, botId: String, text: String, clientMessageId: String? = null, attachments: List<String> = emptyList()): SendResponse {
             val body = JSONObject().put("botId", botId).put("text", text)
+            if (attachments.isNotEmpty()) body.put("attachments", org.json.JSONArray(attachments))
             if (clientMessageId != null) body.put("clientMessageId", clientMessageId)
             val (code, json) = postJsonRaw("/chats/send", body, accessToken)
             return SendResponse(
@@ -115,8 +116,9 @@ class BridgeApi(
             return RoomHistoryResponse(roomId, json.optJSONArray("items")?.mapObjects()?.map(::parseChatItem).orEmpty())
         }
 
-        suspend fun roomSend(accessToken: String, roomId: String, text: String, clientMessageId: String? = null): SendResponse {
+        suspend fun roomSend(accessToken: String, roomId: String, text: String, clientMessageId: String? = null, attachments: List<String> = emptyList()): SendResponse {
             val body = JSONObject().put("roomId", roomId).put("text", text)
+            if (attachments.isNotEmpty()) body.put("attachments", org.json.JSONArray(attachments))
             if (clientMessageId != null) body.put("clientMessageId", clientMessageId)
             val json = postJson("/rooms/send", body, accessToken)
             return SendResponse(ok = json.optBoolean("ok", true), botId = null, sessionId = roomId, stub = false, reason = null,
@@ -174,7 +176,37 @@ class BridgeApi(
         suspend fun addMembers(accessToken: String, roomId: String, ids: List<String>): RoomInfo =
             parseRoom(postJson("/rooms/update", JSONObject().put("id", roomId).put("add", org.json.JSONArray(ids)), accessToken).getJSONObject("room"))
 
+        /** Remove one member or rename the group (ds-bot update-room via the computer). */
+        suspend fun updateRoom(accessToken: String, roomId: String, name: String? = null, remove: List<String> = emptyList()): RoomInfo {
+            val body = JSONObject().put("id", roomId)
+            if (name != null) body.put("name", name)
+            if (remove.isNotEmpty()) body.put("remove", org.json.JSONArray(remove))
+            return parseRoom(postJson("/rooms/update", body, accessToken).getJSONObject("room"))
+        }
+
         suspend fun search(accessToken: String, q: String): List<SearchHit> = parseHits(getJson("/search?q=" + enc(q), accessToken))
+
+        /** Hand one picked picture or file to the computer for the chat it will be sent in. */
+        suspend fun upload(accessToken: String, kind: String, id: String, name: String, bytes: ByteArray): UploadResult = withContext(Dispatchers.IO) {
+            val url = "$baseUrl/uploads?kind=" + enc(kind) + "&id=" + enc(id) + "&name=" + enc(name)
+            val req = Request.Builder().url(url)
+                .post(bytes.toRequestBody("application/octet-stream".toMediaType()))
+                .header("Authorization", "Bearer $accessToken").build()
+            http.newCall(req).execute().use { resp ->
+                val text = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) throw parseError(resp.code, text)
+                parseUpload(JSONObject(text))
+            }
+        }
+
+        /** Bytes of a picture or file in a message. */
+        suspend fun attachmentBytes(accessToken: String, id: String): ByteArray = withContext(Dispatchers.IO) {
+            val req = Request.Builder().url("$baseUrl/attachments?id=" + enc(id)).get().header("Authorization", "Bearer $accessToken").build()
+            http.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) throw parseError(resp.code, resp.body?.string().orEmpty())
+                resp.body?.bytes() ?: ByteArray(0)
+            }
+        }
 
         private fun enc(v: String) = java.net.URLEncoder.encode(v, "UTF-8")
 

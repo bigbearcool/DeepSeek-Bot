@@ -8,6 +8,8 @@ import { bearer, error, html, json, pathOf, readJson } from './http.js'
 import { pairPageHtml } from './pair-page.js'
 import { pairPayload, qrSvg } from './qr.js'
 import { createChatList } from './chat-list.js'
+import { MAX_UPLOAD_BYTES } from './attachments.js'
+import { randomUUID } from 'node:crypto'
 
 /** Paths never served on the device listener (host-only, behind dsh login on 3080). */
 export const HOST_ONLY_PATHS = new Set([
@@ -107,6 +109,7 @@ async function dsCall(run) {
  */
 export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
   const { store, adapter, feed, dsbot } = rt
+  const files = rt.attachments
   const diag = rt.diag ?? { note() {}, snapshot: () => ({}) }
   rt.chatList ??= createChatList({ adapter, dsbot, store, logger: rt.ctx?.logger ?? console })
   const chatList = rt.chatList
@@ -320,7 +323,9 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
         const cursor = url.searchParams.get('cursor')
         const limit = Number(url.searchParams.get('limit') ?? 50)
         if (!botId) return error(400, 'botId required')
-        return json({ ok: true, ...(await adapter.history({ botId, cursor, limit })) })
+        const page = await adapter.history({ botId, cursor, limit })
+        files?.remember(page.items)
+        return json({ ok: true, ...page })
       })
     }
 
@@ -333,7 +338,9 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
           const key = clientMessageId ? `${device.id}:${clientMessageId}` : null
           const seen = key ? recentSends.get(key) : undefined
           if (seen) return json({ ...seen, duplicate: true })
-          const result = await adapter.send({ botId: body.botId, text: body.text })
+          const uploads = Array.isArray(body.attachments) ? body.attachments : []
+          const result = await adapter.send({ botId: body.botId, text: body.text, parts: uploads.length > 0 ? sessionId => files.parts(uploads, sessionId) : null })
+          files?.used(uploads)
           if (result.stub) return json({ ok: false, ...result }, result.status ?? 501)
           const out = { ok: true, ...result, ...(clientMessageId ? { clientMessageId } : {}) }
           if (key) {
@@ -515,6 +522,47 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
       }))
     }
 
+    if (method === 'POST' && sub === '/uploads') {
+      return withAuth(request, async () => {
+        const url = new URL(request.url)
+        const kind = url.searchParams.get('kind') === 'room' ? 'room' : 'bot'
+        const id = url.searchParams.get('id') ?? ''
+        const state = await adapter.readState()
+        const sessionId = kind === 'room'
+          ? (state?.rooms?.[id] && state.rooms[id].hidden !== true ? id : null)
+          : (state?.bots?.[id] ? (state.bots[id].sessionId ?? id) : null)
+        if (!sessionId) return error(404, kind === 'room' ? 'unknown group chat' : 'Unknown Bot', { zh: '找不到这个对话' })
+        const declared = Number(request.headers.get('content-length') ?? 0)
+        if (declared > MAX_UPLOAD_BYTES) return error(413, 'file too large', { zh: '文件太大了，最多 25 MB' })
+        try {
+          const bytes = new Uint8Array(await request.arrayBuffer())
+          return json({ ok: true, ...(await files.upload({ sessionId, bytes, name: url.searchParams.get('name') })) })
+        } catch (err) {
+          const remote = err?.code ?? err?.details?.reason
+          return error(err.status ?? 400, err.message, { zh: err.zh ?? '这个文件发不出去', ...(remote ? { code: remote } : {}) })
+        }
+      })
+    }
+
+    if (method === 'GET' && sub === '/attachments') {
+      return withAuth(request, async () => {
+        const id = new URL(request.url).searchParams.get('id') ?? ''
+        try {
+          const found = id ? await files.read(id) : null
+          if (!found) return error(404, 'attachment not found', { zh: '找不到这个附件' })
+          return new Response(found.bytes, {
+            status: 200,
+            headers: {
+              'content-type': found.mediaType, 'cache-control': 'private, max-age=86400',
+              ...(found.name ? { 'content-disposition': `inline; filename*=UTF-8''${encodeURIComponent(found.name)}` } : {}),
+            },
+          })
+        } catch (err) {
+          return error(err.status ?? 500, err.message)
+        }
+      })
+    }
+
     if (method === 'GET' && sub === '/search') {
       return withAuth(request, async () => {
         const q = new URL(request.url).searchParams.get('q') ?? ''
@@ -551,7 +599,9 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
         const roomId = new URL(request.url).searchParams.get('roomId') ?? ''
         if (!roomId) return error(400, 'roomId required')
         try {
-          return json({ ok: true, ...(await adapter.roomHistory({ roomId })) })
+          const page = await adapter.roomHistory({ roomId })
+          files?.remember(page.items)
+          return json({ ok: true, ...page })
         } catch (err) {
           return error(err.status ?? 500, err.message, { zh: zhMessage(err.message) ?? undefined })
         }
@@ -563,8 +613,9 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
         const body = await readJson(request)
         const roomId = typeof body.roomId === 'string' ? body.roomId : ''
         const text = String(body.text ?? '').trim()
+        const uploads = Array.isArray(body.attachments) ? body.attachments.filter(id => typeof id === 'string') : []
         if (!roomId) return error(400, 'roomId required')
-        if (!text) return error(400, 'text required')
+        if (!text && uploads.length === 0) return error(400, 'text required')
         const clientMessageId = typeof body.clientMessageId === 'string' && body.clientMessageId.length <= 128
           ? body.clientMessageId : null
         const key = clientMessageId ? `${device.id}:room:${clientMessageId}` : null
@@ -579,7 +630,15 @@ export function createHandler(rt, { surface = 'web', limiter = null } = {}) {
         }
         return dsCall(async () => {
           try {
-            await dsbot.call('send', { sessionId: roomId, text })
+            if (uploads.length === 0) await dsbot.call('send', { sessionId: roomId, text })
+            else {
+              // With pictures or files: the same prompt ds-bot's send makes for a group Session,
+              // plus the attachment parts, so dsh admits them exactly as for the desktop chat.
+              const parts = files.parts(uploads, roomId)
+              const sc = rt.ctx?.get?.('sessionController') ?? rt.ctx?.sessionController
+              await sc.prompt({ requestId: randomUUID(), sessionId: roomId, mode: 'queue', content: [...(text ? [{ type: 'text', text }] : []), ...parts] }, AbortSignal.timeout(30_000))
+              files.used(uploads)
+            }
           } catch (err) {
             diag.note('send.fail', { roomId, stage: 'ds-bot', status: err.status ?? 500, code: err.code ?? null, error: err.message }, { level: 'warn' })
             throw err
@@ -657,6 +716,8 @@ export function installRoutes(rt) {
     ['/bots/update', ['POST']],
     ['/rooms/update', ['POST']],
     ['/search', ['GET']],
+    ['/uploads', ['POST']],
+    ['/attachments', ['GET']],
     ['/rooms/history', ['GET']],
     ['/rooms/send', ['POST']],
     ['/rooms/stop', ['POST']],

@@ -9,7 +9,7 @@
 
 English | [中文](README.zh.md)
 
-> **这是 [Fei2411/DeepSeek-Bot](https://github.com/Fei2411/DeepSeek-Bot) 的 fork。** 上游：https://github.com/Fei2411/DeepSeek-Bot 。下面三节只说明本 fork 和上游的关系；从「Install」开始是上游原文。
+> **这是 [Fei2411/DeepSeek-Bot](https://github.com/Fei2411/DeepSeek-Bot) 的 fork。** 上游：https://github.com/Fei2411/DeepSeek-Bot 。前面的中文部分（这个仓库是做什么的 / 怎么装 / 装好后能做什么 / 与上游的差异 / 已合入的上游功能 / 手机 App）是本 fork 自己写的；从「Install」开始是上游原文。
 
 ## 这个仓库是做什么的
 
@@ -50,7 +50,7 @@ cd dsh-mobile-android
 
 装包在 `app/build/outputs/apk/debug/app-debug.apk`，传到 Android 手机上装好。
 
-**4. 配对**：在 DSH 网页左侧栏底部点「**手机配对**」，会弹出一个 6 位配对码（约 5 分钟有效）和二维码。打开手机 App，扫码或输入配对码就连上了。要在外网用，先在配对面板的设置里填「公网访问地址」（例如 `https://example.com:8443`），二维码里会带上这个地址。
+**4. 配对**：在 DSH 网页左侧栏底部点「**手机配对**」，会弹出一个 6 位配对码（约 5 分钟有效）和二维码。打开手机 App，扫码或输入配对码就连上了。要在外网用，在同一个「手机配对」弹窗下方填写并保存「公网访问地址」（例如 `https://example.com:8443`，只有登录了 DSH 的网页端能改），之后二维码里就会带上这个地址；不填就用自动找到的局域网地址。
 
 ## 装好后能做什么
 

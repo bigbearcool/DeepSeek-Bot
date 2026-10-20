@@ -29,11 +29,10 @@ APK: `app/build/outputs/apk/debug/app-debug.apk`
 
 ## Default base URL
 
-`http://192.168.1.100:8787/api/mobile-bridge/v1` — change in-app to your NAS / LAN dsh origin + `/api/mobile-bridge/v1`.
+`http://<电脑地址>:8787/api/mobile-bridge/v1` — change in-app to your NAS / LAN dsh origin + `/api/mobile-bridge/v1`.
 
 Cleartext HTTP is allowed for LAN (see `network_security_config.xml`).
 
 ## Notes
 
-- Local only; do not push remote until 大熊/园长 say so.
 - Camera permission for QR; typing the code always works.

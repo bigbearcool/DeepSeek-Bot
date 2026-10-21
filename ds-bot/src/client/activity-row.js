@@ -21,8 +21,12 @@ function useRunningHost(active) {
     let frame = 0
     const find = () => {
       frame = 0
-      const node = document.querySelector('[data-chat-flow] > [data-chat-running]')
-      setHost(prev => (prev === node ? prev : node))
+      // DSH 0.2.1-rc.2 wraps the flow in a slot outlet, so [data-chat-running] is no
+      // longer a direct child of [data-chat-flow]. A descendant selector matches both
+      // that layout and the older direct-child one; closest keeps a stray node out.
+      const node = document.querySelector('[data-chat-flow] [data-chat-running]')
+      const host = node?.closest('[data-chat-flow]') ? node : null
+      setHost(prev => (prev === host ? prev : host))
     }
     const observer = new MutationObserver(() => { if (!frame) frame = requestAnimationFrame(find) })
     observer.observe(document.querySelector('[data-conversation-scroll]') ?? document.body, { childList: true, subtree: true })

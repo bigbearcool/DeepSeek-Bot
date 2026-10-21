@@ -5865,8 +5865,9 @@ function useRunningHost(active) {
     let frame = 0;
     const find = () => {
       frame = 0;
-      const node = document.querySelector("[data-chat-flow] > [data-chat-running]");
-      setHost((prev) => prev === node ? prev : node);
+      const node = document.querySelector("[data-chat-flow] [data-chat-running]");
+      const host2 = node?.closest("[data-chat-flow]") ? node : null;
+      setHost((prev) => prev === host2 ? prev : host2);
     };
     const observer = new MutationObserver(() => {
       if (!frame) frame = requestAnimationFrame(find);

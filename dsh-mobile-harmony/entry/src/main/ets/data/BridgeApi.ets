@@ -184,10 +184,11 @@ export class BridgeApi {
     return s;
   }
 
-  async markRead(token: string, kind: string, id: string): Promise<void> {
+  async markRead(token: string, kind: string, id: string, seq: number): Promise<void> {
     const b: JObj = {};
     b['kind'] = kind;
     b['id'] = id;
+    b['seq'] = seq;
     await this.postJson('/chats/read', b, token);
   }
 

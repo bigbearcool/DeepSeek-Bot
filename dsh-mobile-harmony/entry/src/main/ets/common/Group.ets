@@ -213,12 +213,14 @@ export class RoomStreams {
   }
 
   static start(list: LiveReply[], attemptId: string, botId: string | null, name: string | null): LiveReply[] {
-    return list.filter((x: LiveReply) => x.attemptId !== attemptId).concat([new LiveReply(attemptId, botId, name)]);
+    return list.some((x: LiveReply) => x.attemptId === attemptId) ? list :
+      list.concat([new LiveReply(attemptId, botId, name)]);
   }
 
   static delta(list: LiveReply[], attemptId: string, text: string, botId: string | null, name: string | null): LiveReply[] {
     if (!list.some((x: LiveReply) => x.attemptId === attemptId)) {
-      return list.concat([new LiveReply(attemptId, botId, name, text)]);
+      // After reconnect, a suffix without its start is not a complete reply.
+      return list;
     }
     return list.map((x: LiveReply) => x.attemptId === attemptId ?
       new LiveReply(x.attemptId, x.botId, x.name, RoomStreams.mergeText(x.text, text), x.endedAt) : x);
@@ -240,15 +242,9 @@ export class RoomStreams {
     if (item.kind !== 'member' || item.botId === null) {
       return list;
     }
-    const i = list.findIndex((x: LiveReply) => x.botId === item.botId && x.endedAt > 0);
-    if (i >= 0) {
-      const out = list.slice();
-      out.splice(i, 1);
-      return out;
-    }
-    const body = item.text ?? '';
-    return list.filter((x: LiveReply) => !(x.botId === item.botId && x.text.trim().length > 0 &&
-      body.indexOf(x.text.trim().substring(0, 40)) >= 0));
+    const ended = list.findIndex((x: LiveReply) => x.botId === item.botId && x.endedAt > 0);
+    const i = ended >= 0 ? ended : list.findIndex((x: LiveReply) => x.botId === item.botId);
+    return list.filter((x: LiveReply, index: number) => index !== i);
   }
 
   static prune(list: LiveReply[], now: number): LiveReply[] {

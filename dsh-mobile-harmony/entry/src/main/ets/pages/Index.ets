@@ -1,3 +1,4 @@
+import { ReadReceipts } from '../common/ReadReceipts';
 import { util } from '@kit.ArkTS';
 import { scanBarcode, scanCore } from '@kit.ScanKit';
 import { common } from '@kit.AbilityKit';
@@ -100,6 +101,12 @@ struct Index {
   private auth: Auth | null = null;
   private sse: SseClient = new SseClient();
   private sseAttempt: number = 0;
+  private chatGeneration: number = 0;
+  private streamGeneration: number = 0;
+  private reconnectTimer: number = -1;
+  private historyLoaded: boolean = false;
+  private readReceipts: ReadReceipts = new ReadReceipts();
+  private listGeneration: number = 0;
   private listTimer: number = -1;
   private scroller: Scroller = new Scroller();
 
@@ -113,6 +120,7 @@ struct Index {
       this.sseAttempt = 0;
       this.loadHistory();
       this.openStream();
+      this.markRead();
     }
   }
 
@@ -133,6 +141,14 @@ struct Index {
         return;
       }
       const now = Date.now();
+      const pruned = RoomStreams.prune(this.live, now);
+      if (pruned.length !== this.live.length) {
+        this.live = pruned;
+      }
+      if (this.wait.endedAt > 0 && now - this.wait.endedAt >= RoomStreams.KEEP_ENDED_MS) {
+        this.wait = WaitMachine.reduce(this.wait, new WaitEvent(WaitKind.Dismiss));
+        this.loadHistory();
+      }
       const waiting = this.wait.phase === WaitPhase.Waiting || this.wait.phase === WaitPhase.Streaming;
       if (LiveTimers.shouldPoll(waiting, this.lastEventAt, this.lastPollAt, now)) {
         this.lastPollAt = now;
@@ -142,12 +158,14 @@ struct Index {
   }
 
   aboutToDisappear(): void {
-    this.sse.close();
+    this.invalidateChat();
     if (this.stallTimer >= 0) {
       clearInterval(this.stallTimer);
+      this.stallTimer = -1;
     }
     if (this.listTimer >= 0) {
       clearInterval(this.listTimer);
+      this.listTimer = -1;
     }
   }
 
@@ -325,7 +343,9 @@ struct Index {
   }
 
   private async repair(): Promise<void> {
-    this.sse.close();
+    this.invalidateChat();
+    this.listGeneration++;
+    this.readReceipts = new ReadReceipts();
     if (this.auth !== null) {
       await this.auth.logout();
     }
@@ -340,7 +360,9 @@ struct Index {
   // ---------- errors ----------
   private fail(e: Object): void {
     if (LaunchRouter.requiresRepair(e)) {
-      this.sse.close();
+      this.invalidateChat();
+      this.listGeneration++;
+      this.readReceipts = new ReadReceipts();
       this.screen = 'pair';
       this.notice = '这台手机需要重新配对';
       if (this.auth !== null) {
@@ -418,9 +440,17 @@ struct Index {
     if (this.auth === null) {
       return;
     }
+    const generation = ++this.listGeneration;
     try {
+      await this.flushReads();
+      if (generation !== this.listGeneration || this.screen === 'pair') {
+        return;
+      }
       const list = await this.auth.with((t: string, api: BridgeApi) => api.chatList(t));
       const team = await this.auth.with((t: string, api: BridgeApi) => api.team(t));
+      if (generation !== this.listGeneration) {
+        return;
+      }
       this.bots = team.bots;
       this.rooms = team.rooms;
       let chats = ChatListLogic.sorted(list.chats).map((c: ChatEntry) => {
@@ -430,14 +460,16 @@ struct Index {
         const r = team.rooms.find((x: RoomInfo) => x.id === c.id);
         const n: ChatEntry = {
           kind: c.kind, id: c.id, name: roomTitle(c.name, r === undefined ? c.members : r.memberNames), color: c.color,
-          main: c.main, preview: c.preview, lastAt: c.lastAt, unread: c.unread, running: c.running, members: c.members
+          main: c.main, preview: c.preview, lastAt: c.lastAt, unread: c.unread, running: c.running, members: c.members, seq: c.seq
         };
         return n;
       });
-      if (this.screen === 'chat') {
+      chats = this.readReceipts.apply(chats);
+      if (this.screen === 'chat' && this.foreground) {
         chats = ChatListLogic.clearOpen(chats, this.openKind, this.openId);
       }
       this.chats = chats;
+      list.chats = chats;
       this.approvals = list.approvals;
       const openKey = this.screen === 'chat' && this.foreground ? NotifyLogic.key(this.openKind, this.openId) : '';
       const bundle = this.ctx().abilityInfo.bundleName;
@@ -447,6 +479,9 @@ struct Index {
       this.seen = NotifyLogic.seen(list);
       this.offline = false;
     } catch (e) {
+      if (generation !== this.listGeneration) {
+        return;
+      }
       if (LaunchRouter.requiresRepair(e as Object)) {
         this.fail(e as Object);
       } else {
@@ -456,8 +491,24 @@ struct Index {
   }
 
   // ---------- chat ----------
-  async openChat(kind: string, id: string, name: string): Promise<void> {
+  private invalidateChat(): void {
+    this.chatGeneration++;
+    this.streamGeneration++;
     this.sse.close();
+    if (this.reconnectTimer >= 0) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = -1;
+    }
+  }
+
+  private ownsChat(kind: string, id: string, generation: number): boolean {
+    return this.chatGeneration === generation && this.openKind === kind && this.openId === id;
+  }
+
+  async openChat(kind: string, id: string, name: string): Promise<void> {
+    this.invalidateChat();
+    const generation = this.chatGeneration;
+    this.historyLoaded = false;
     this.openKind = kind;
     this.openId = id;
     this.openName = name.length > 0 ? name : this.nameOf(kind, id);
@@ -478,7 +529,13 @@ struct Index {
     if (this.store !== null) {
       await this.store.setLastChat(kind + ':' + id);
     }
+    if (!this.ownsChat(kind, id, generation)) {
+      return;
+    }
     await this.loadHistory();
+    if (!this.ownsChat(kind, id, generation) || this.screen !== 'chat') {
+      return;
+    }
     this.sseAttempt = 0;
     this.openStream();
     this.markRead();
@@ -498,7 +555,8 @@ struct Index {
   }
 
   closeChat(): void {
-    this.sse.close();
+    this.markRead();
+    this.invalidateChat();
     this.screen = 'list';
     this.openKind = '';
     this.openId = '';
@@ -509,15 +567,37 @@ struct Index {
   }
 
   private async markRead(): Promise<void> {
-    if (this.auth === null) {
+    if (this.auth === null || this.screen !== 'chat' || !this.foreground) {
       return;
     }
-    const kind = this.openKind;
-    const id = this.openId;
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const item = this.messages[i];
+      if (!item.local && item.seq !== null) {
+        this.readReceipts.record(this.openKind, this.openId, item.seq);
+        break;
+      }
+    }
+    await this.flushReads();
+  }
+
+  private async flushReads(): Promise<void> {
+    const auth = this.auth;
+    if (auth === null) {
+      return;
+    }
     try {
-      await this.auth.with((t: string, api: BridgeApi) => api.markRead(t, kind, id));
+      await this.readReceipts.flush((kind: string, id: string, seq: number) =>
+        auth.with((t: string, api: BridgeApi) => api.markRead(t, kind, id, seq)));
+      this.chats = this.readReceipts.apply(this.chats);
+      if (this.notice === '已读状态暂未同步，连接恢复后会重试') {
+        this.notice = '';
+      }
     } catch (e) {
-      // not important
+      if (LaunchRouter.requiresRepair(e as Object)) {
+        this.fail(e as Object);
+      } else {
+        this.notice = '已读状态暂未同步，连接恢复后会重试';
+      }
     }
   }
 
@@ -527,26 +607,54 @@ struct Index {
     }
     const kind = this.openKind;
     const id = this.openId;
+    const generation = this.chatGeneration;
+    const baseline = this.messages.slice();
+    const requestId = this.wait.clientMessageId;
+    const attemptId = this.wait.attemptId;
     try {
+      let items: ChatItem[];
+      let cursor = '';
       if (kind === 'room') {
-        const items = await this.auth.with((t: string, api: BridgeApi) => api.roomHistory(t, id));
-        if (this.openId === id) {
-          this.messages = ChatMerge.mergeHistory(this.messages, items);
-        }
+        items = await this.auth.with((t: string, api: BridgeApi) => api.roomHistory(t, id));
       } else {
         const h = await this.auth.with((t: string, api: BridgeApi) => api.history(t, id, null));
-        if (this.openId === id) {
-          this.messages = ChatMerge.mergeHistory(this.messages, h.items);
-          this.nextCursor = h.nextCursor ?? '';
+        items = h.items;
+        cursor = h.nextCursor ?? '';
+      }
+      if (!this.ownsChat(kind, id, generation)) {
+        return;
+      }
+      let throughSeq = -1;
+      let throughTime = -1;
+      for (const item of baseline) {
+        if (!item.local && item.seq !== null) {
+          throughSeq = item.seq;
+          throughTime = item.time ?? -1;
         }
       }
-      if ((this.wait.phase === WaitPhase.Waiting || this.wait.phase === WaitPhase.Streaming) &&
-        this.openId === id && LiveTimers.replied(this.messages)) {
-        this.wait = WaitMachine.reduce(this.wait, new WaitEvent(WaitKind.StreamEnd));
+      const fresh = items.filter((item: ChatItem) => item.seq !== null &&
+        (item.time !== null && throughTime >= 0 ? item.time > throughTime : item.seq > throughSeq));
+      this.messages = ChatMerge.mergeHistory(this.messages, items);
+      this.markRead();
+      if (!this.historyLoaded) {
+        this.nextCursor = cursor;
+        this.historyLoaded = true;
+      }
+      if (kind === 'room') {
+        for (const item of fresh) {
+          this.live = RoomStreams.onMessage(this.live, item);
+        }
+      }
+      if (this.wait.clientMessageId === requestId && this.wait.attemptId === attemptId &&
+        fresh.some((item: ChatItem) => item.kind === 'bot' || item.kind === 'member')) {
+        this.wait = WaitMachine.reduce(this.wait, new WaitEvent(WaitKind.BotMessage));
       }
       this.scrollEnd();
     } catch (e) {
-      if (LaunchRouter.chatGone(e as Object) && this.openId === id && this.screen === 'chat') {
+      if (!this.ownsChat(kind, id, generation)) {
+        return;
+      }
+      if (LaunchRouter.chatGone(e as Object) && this.screen === 'chat') {
         this.closeChat();
         this.toast('这个会话在电脑上已经不存在了');
         return;
@@ -561,15 +669,18 @@ struct Index {
     }
     const id = this.openId;
     const cur = this.nextCursor;
+    const generation = this.chatGeneration;
     this.nextCursor = '';
     try {
       const h = await this.auth.with((t: string, api: BridgeApi) => api.history(t, id, cur));
-      if (this.openId === id) {
-        this.messages = h.items.concat(this.messages);
+      if (this.ownsChat('bot', id, generation)) {
+        this.messages = ChatMerge.mergeHistory(this.messages, h.items);
         this.nextCursor = h.nextCursor ?? '';
       }
     } catch (e) {
-      this.nextCursor = cur;
+      if (this.ownsChat('bot', id, generation)) {
+        this.nextCursor = cur;
+      }
     }
   }
 
@@ -602,38 +713,55 @@ struct Index {
       return;
     }
     this.sse.close();
+    if (this.reconnectTimer >= 0) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = -1;
+    }
     const kind = this.openKind;
     const id = this.openId;
+    const generation = this.chatGeneration;
+    const stream = ++this.streamGeneration;
     try {
       const token = await this.auth.refresh(false);
+      if (!this.ownsChat(kind, id, generation) || stream !== this.streamGeneration) {
+        return;
+      }
       const api = this.auth.api();
       const url = kind === 'room' ? api.streamUrl('', id, RoomRound.since(this.messages)) : api.streamUrl(id, '', -1);
       this.lastEventAt = Date.now();
       this.startStallCheck();
       this.sse.open(url, token, (ev: SseEvent) => {
+        if (!this.ownsChat(kind, id, generation) || stream !== this.streamGeneration) {
+          return;
+        }
         this.sseAttempt = 0;
         this.lastEventAt = Date.now();
-        if (this.openKind === kind && this.openId === id) {
-          this.onSse(ev);
-        }
+        this.onSse(ev);
       }, (code: number) => {
-        if (this.screen !== 'chat' || this.openId !== id) {
+        if (!this.ownsChat(kind, id, generation) || stream !== this.streamGeneration) {
           return;
         }
         if (code === 401 && this.auth !== null) {
-          this.auth.refresh(true).catch((e: Object) => this.fail(e));
+          this.auth.refresh(true).catch((e: Object) => {
+            if (this.ownsChat(kind, id, generation) && stream === this.streamGeneration) {
+              this.fail(e);
+            }
+          });
         }
         const backoff = LiveTimers.backoff(this.sseAttempt);
         this.sseAttempt++;
-        setTimeout(() => {
-          if (this.screen === 'chat' && this.openId === id) {
+        this.reconnectTimer = setTimeout(() => {
+          this.reconnectTimer = -1;
+          if (this.ownsChat(kind, id, generation) && stream === this.streamGeneration && this.screen === 'chat') {
             this.loadHistory();
             this.openStream();
           }
         }, backoff);
       });
     } catch (e) {
-      this.fail(e as Object);
+      if (this.ownsChat(kind, id, generation) && stream === this.streamGeneration) {
+        this.fail(e as Object);
+      }
     }
   }
 
@@ -649,24 +777,25 @@ struct Index {
         return;
       }
       const item = parseChatItem(o);
-      if (item.kind === 'bot' || item.kind === 'member') {
+      const merged = ChatMerge.mergeIncoming(this.messages, item);
+      if (merged !== this.messages && (item.kind === 'bot' || item.kind === 'member')) {
         this.wait = WaitMachine.reduce(this.wait, new WaitEvent(WaitKind.BotMessage));
       }
-      this.messages = ChatMerge.mergeIncoming(this.messages, item);
+      this.messages = merged;
+      this.markRead();
       this.scrollEnd();
     } else if (ev.event === 'stream' && this.openKind === 'bot') {
+      const attempt = J.strOr(data, 'attemptId', '');
       const phase = J.strOr(data, 'phase', '');
       if (phase === 'start') {
-        this.wait = WaitMachine.reduce(this.wait, new WaitEvent(WaitKind.StreamStart));
+        this.wait = WaitMachine.reduce(this.wait, new WaitEvent(WaitKind.StreamStart, '', attempt));
       } else if (phase === 'end') {
-        if (this.wait.phase === WaitPhase.Streaming) {
-          this.messages = ChatMerge.commitStreamed(this.messages, this.wait.text, Date.now());
-        }
-        this.wait = WaitMachine.reduce(this.wait, new WaitEvent(WaitKind.StreamEnd));
+        this.wait = WaitMachine.reduce(this.wait, new WaitEvent(WaitKind.StreamEnd, '', attempt));
+        this.loadHistory();
       } else {
         const d = J.strOr(data, 'text', '');
         if (d.length > 0) {
-          this.wait = WaitMachine.reduce(this.wait, new WaitEvent(WaitKind.Delta, d));
+          this.wait = WaitMachine.reduce(this.wait, new WaitEvent(WaitKind.Delta, d, attempt));
           this.scrollEnd();
         }
       }
@@ -685,8 +814,12 @@ struct Index {
       if (RoomRound.endsWait(item)) {
         this.wait = WaitMachine.reduce(this.wait, new WaitEvent(WaitKind.Dismiss));
       }
-      this.messages = ChatMerge.mergeIncoming(this.messages, item);
-      this.live = RoomStreams.prune(RoomStreams.onMessage(this.live, item), now);
+      const merged = ChatMerge.mergeIncoming(this.messages, item);
+      if (merged !== this.messages) {
+        this.live = RoomStreams.prune(RoomStreams.onMessage(this.live, item), now);
+      }
+      this.messages = merged;
+      this.markRead();
       this.scrollEnd();
     } else if (ev.event === 'round') {
       if (J.strOr(data, 'phase', '') !== 'end') {
@@ -699,6 +832,7 @@ struct Index {
         this.wait = WaitMachine.reduce(this.wait, new WaitEvent(WaitKind.Dismiss));
       }
       this.live = RoomRound.dropUnshown(this.live);
+      this.loadHistory();
     } else if (ev.event === 'stream') {
       const attempt = J.strOr(data, 'attemptId', '');
       if (attempt.length === 0) {
@@ -712,6 +846,7 @@ struct Index {
         live = RoomStreams.start(live, attempt, botId, name);
       } else if (phase === 'end') {
         live = RoomStreams.end(live, attempt, now);
+        this.loadHistory();
       } else {
         const d = J.strOr(data, 'text', '');
         if (d.length > 0) {
@@ -1552,8 +1687,8 @@ struct Index {
               }
             }
           }
-        }, (m: ChatItem, i: number) => (m.seq ?? -1) + ':' + (m.clientMessageId ?? '') + ':' + i + ':' + m.local + ':' +
-          this.messages.length + ':' + this.openRuns.join(','))
+        }, (m: ChatItem) => m.kind + ':' + (m.seq ?? -1) + ':' + (m.time ?? -1) + ':' +
+          (m.botId ?? '') + ':' + (m.clientMessageId ?? ''))
         ForEach(this.live.filter((x: LiveReply) => RoomStreams.shown(x) !== null), (x: LiveReply) => {
           ListItem() {
             Column({ space: 4 }) {

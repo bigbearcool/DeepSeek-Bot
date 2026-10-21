@@ -56,25 +56,17 @@ export default function batch2Test() {
       expect(RoomStreams.shown(new LiveReply('1', 'a', '甲', '[PA'))).assertNull();
       expect(RoomStreams.shown(new LiveReply('1', 'a', '甲', '甲：你好'))).assertEqual('你好');
     });
-    it('streamMergeDeltaAndSnapshot', 0, () => {
+    it('streamMergeUsesDeltaProtocol', 0, () => {
       expect(StreamText.merge('', '在')).assertEqual('在');
       expect(StreamText.merge('在', '，大')).assertEqual('在，大');
       expect(StreamText.merge('在，大', '熊')).assertEqual('在，大熊');
-      expect(StreamText.merge('在', '在，大')).assertEqual('在，大');
-      expect(StreamText.merge('在，大', '在，大熊')).assertEqual('在，大熊');
-      expect(StreamText.merge('在，大熊', '在，大熊，参谋在线。')).assertEqual('在，大熊，参谋在线。');
-      expect(StreamText.merge('在，大', '在，大')).assertEqual('在，大');
-      expect(StreamText.merge('在，大熊，参谋在线。', '在')).assertEqual('在，大熊，参谋在线。');
+      expect(StreamText.merge('在', '在，大')).assertEqual('在在，大');
+      expect(StreamText.merge('在，大', '在，大')).assertEqual('在，大在，大');
       let l = RoomStreams.start([], 'a', 'b', '参谋');
       l = RoomStreams.delta(l, 'a', '在', null, null);
       l = RoomStreams.delta(l, 'a', '，大', null, null);
-      expect(l[0].text).assertEqual('在，大');
-      l = RoomStreams.delta(l, 'a', '在，大熊', null, null);
+      l = RoomStreams.delta(l, 'a', '熊', null, null);
       expect(l[0].text).assertEqual('在，大熊');
-      l = RoomStreams.delta(l, 'a', '在，大熊，参谋在线。', null, null);
-      expect(l[0].text).assertEqual('在，大熊，参谋在线。');
-      l = RoomStreams.delta(l, 'a', '在，大熊，参谋在线。', null, null);
-      expect(l[0].text).assertEqual('在，大熊，参谋在线。');
     });
 
     it('startDeltaEnd', 0, () => {
@@ -87,11 +79,11 @@ export default function batch2Test() {
       expect(RoomStreams.prune(l, 100 + 9000).length).assertEqual(0);
     });
     it('passEndDropped', 0, () => {
-      const l = RoomStreams.delta([], 'y', 'PASS', 'a', '甲');
+      const l = RoomStreams.delta(RoomStreams.start([], 'y', 'a', '甲'), 'y', 'PASS', 'a', '甲');
       expect(RoomStreams.end(l, 'y', 1).length).assertEqual(0);
     });
     it('loggedLineReplaces', 0, () => {
-      const l = RoomStreams.end(RoomStreams.delta([], 'x', '答案', 'a', '甲'), 'x', 5);
+      const l = RoomStreams.end(RoomStreams.delta(RoomStreams.start([], 'x', 'a', '甲'), 'x', '答案', 'a', '甲'), 'x', 5);
       const m = newItem('member', '答案', 6);
       m.botId = 'a';
       expect(RoomStreams.onMessage(l, m).length).assertEqual(0);

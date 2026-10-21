@@ -83,6 +83,7 @@ export interface SendResponse {
 }
 
 export interface ChatEntry {
+  seq?: number | null;
   kind: string;
   id: string;
   name: string;
@@ -290,6 +291,7 @@ export function parseHistory(o: JObj): HistoryResponse {
 export function parseChatEntry(o: JObj): ChatEntry {
   const last = J.num(o, 'lastAt');
   const e: ChatEntry = {
+    seq: J.num(o, 'seq'),
     kind: J.str(o, 'kind') === 'room' ? 'room' : 'bot',
     id: J.strOr(o, 'id', ''),
     name: J.strOr(o, 'name', J.strOr(o, 'id', '')),

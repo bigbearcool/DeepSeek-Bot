@@ -1,3 +1,5 @@
+import readReceiptsTest from './ReadReceipts.test';
+import streamingTest from './Streaming.test';
 import batch1Test from './Batch1.test';
 import batch2Test from './Batch2.test';
 import batch3Test from './Batch3.test';
@@ -10,4 +12,6 @@ export default function testsuite() {
   batch3Test();
   batch4Test();
   batch5Test();
+  streamingTest();
+  readReceiptsTest();
 }

@@ -112,14 +112,7 @@ export default function batch1Test() {
       expect(out[0].local).assertFalse();
       expect(out[1].text).assertEqual('还没到');
     });
-    it('streamedReplacedByServer', 0, () => {
-      const streamed = ChatMerge.commitStreamed([], '**答**', 2000000);
-      expect(streamed.length).assertEqual(1);
-      expect(streamed[0].local).assertTrue();
-      const srv = server('bot', '**答**', 9, null, 2000100);
-      expect(ChatMerge.mergeHistory(streamed, [srv]).length).assertEqual(1);
-      expect(ChatMerge.commitStreamed([srv], '**答**', 2000200).length).assertEqual(1);
-    });
+
   });
 
   describe('waitMachine', () => {
@@ -133,7 +126,7 @@ export default function batch1Test() {
         new WaitEvent(WaitKind.Delta, 'a'), new WaitEvent(WaitKind.Delta, 'b')]);
       expect(s.phase).assertEqual(WaitPhase.Streaming);
       expect(s.text).assertEqual('ab');
-      expect(WaitMachine.reduce(s, new WaitEvent(WaitKind.StreamEnd)).phase).assertEqual(WaitPhase.Idle);
+      expect(WaitMachine.reduce(s, new WaitEvent(WaitKind.StreamEnd)).phase).assertEqual(WaitPhase.Streaming);
     });
     it('deltaWithoutStart', 0, () => {
       expect(run([new WaitEvent(WaitKind.Submitted, 'c1'), new WaitEvent(WaitKind.Delta, 'x')]).text).assertEqual('x');
@@ -151,7 +144,7 @@ export default function batch1Test() {
     });
     it('botMessage', 0, () => {
       expect(run([new WaitEvent(WaitKind.Submitted, 'c1'), new WaitEvent(WaitKind.BotMessage)]).phase).assertEqual(WaitPhase.Idle);
-      expect(run([new WaitEvent(WaitKind.StreamStart), new WaitEvent(WaitKind.BotMessage)]).phase).assertEqual(WaitPhase.Streaming);
+      expect(run([new WaitEvent(WaitKind.StreamStart), new WaitEvent(WaitKind.BotMessage)]).phase).assertEqual(WaitPhase.Idle);
     });
   });
 

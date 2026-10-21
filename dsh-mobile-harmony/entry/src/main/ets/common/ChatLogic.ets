@@ -1,4 +1,4 @@
-import { ChatItem, ChatEntry, ApprovalInfo, copyItem, newItem } from './Models';
+import { ChatItem, ChatEntry, ApprovalInfo, copyItem } from './Models';
 import { AuthRevokedError, BridgeError } from './Errors';
 
 function norm(t: string | null): string {
@@ -46,34 +46,21 @@ export class ChatMerge {
   }
 
   static mergeHistory(current: ChatItem[], page: ChatItem[]): ChatItem[] {
-    let out = page.slice();
-    for (const item of current) {
-      if (!item.local) {
-        continue;
-      }
-      const matched = page.some((p: ChatItem) => ChatMerge.matchesLocal(item, p)) ||
-        (item.kind === 'bot' && page.some((p: ChatItem) => p.kind === 'bot' &&
-          (p.time ?? 0) >= (item.time ?? 0) - ChatMerge.WINDOW_MS));
-      if (!matched) {
-        out.push(item);
-      }
+    let out = current.slice();
+    for (const item of page) {
+      out = ChatMerge.mergeIncoming(out, item);
     }
-    return out;
+    return out.sort((a: ChatItem, b: ChatItem) => {
+      if (a.time !== null && b.time !== null && a.time !== b.time) {
+        return a.time - b.time;
+      }
+      if (!a.local && !b.local && a.seq !== null && b.seq !== null) {
+        return a.seq - b.seq;
+      }
+      return 0;
+    });
   }
 
-  static commitStreamed(list: ChatItem[], text: string, now: number): ChatItem[] {
-    if (text.trim().length === 0) {
-      return list;
-    }
-    const tail = list.slice(Math.max(0, list.length - 6));
-    const dup = tail.some((x: ChatItem) => !x.local && x.kind === 'bot' && norm(x.text) === norm(text));
-    if (dup) {
-      return list;
-    }
-    const i = newItem('bot', text, now);
-    i.local = true;
-    return list.concat([i]);
-  }
 }
 
 export enum WaitPhase { Idle, Waiting, Streaming, Failed }
@@ -83,6 +70,9 @@ export class WaitState {
   text: string = '';
   error: string = '';
   clientMessageId: string = '';
+  attemptId: string = '';
+  endedAt: number = 0;
+  settled: boolean = false;
 
   static of(phase: WaitPhase, text: string = '', error: string = '', id: string = ''): WaitState {
     const s = new WaitState();
@@ -98,23 +88,9 @@ export class WaitState {
   }
 }
 
-/** Merge one stream update: append a delta, or replace when the computer sends the full text so far. */
+/** The bridge sends text-delta, including legitimate repeated characters. */
 export class StreamText {
   static merge(prev: string, incoming: string): string {
-    if (incoming.length === 0) {
-      return prev;
-    }
-    if (prev.length === 0) {
-      return incoming;
-    }
-    // Full text so far (snapshot): replace, do not append on top of itself.
-    if (incoming === prev || incoming.startsWith(prev)) {
-      return incoming;
-    }
-    // Older snapshot arriving late.
-    if (prev.startsWith(incoming)) {
-      return prev;
-    }
     return prev + incoming;
   }
 }
@@ -124,14 +100,25 @@ export enum WaitKind { Submitted, SendFailed, StreamStart, Delta, StreamEnd, Bot
 export class WaitEvent {
   kind: WaitKind;
   value: string;
+  attemptId: string;
 
-  constructor(kind: WaitKind, value: string = '') {
+  constructor(kind: WaitKind, value: string = '', attemptId: string = '') {
     this.kind = kind;
     this.value = value;
+    this.attemptId = attemptId;
   }
 }
 
 export class WaitMachine {
+  private static stream(s: WaitState, phase: WaitPhase, text: string, attemptId: string,
+    endedAt: number = 0, settled: boolean = false): WaitState {
+    const n = WaitState.of(phase, text, '', s.clientMessageId);
+    n.attemptId = attemptId;
+    n.endedAt = endedAt;
+    n.settled = settled;
+    return n;
+  }
+
   static reduce(s: WaitState, e: WaitEvent): WaitState {
     switch (e.kind) {
       case WaitKind.Submitted:
@@ -139,16 +126,25 @@ export class WaitMachine {
       case WaitKind.SendFailed:
         return s.phase === WaitPhase.Waiting ? WaitState.of(WaitPhase.Failed, s.text, e.value, s.clientMessageId) : s;
       case WaitKind.StreamStart:
-        return WaitState.of(WaitPhase.Streaming, '', '', s.clientMessageId);
-      case WaitKind.Delta:
-        if (s.phase === WaitPhase.Streaming) {
-          return WaitState.of(WaitPhase.Streaming, StreamText.merge(s.text, e.value), '', s.clientMessageId);
+        if (e.attemptId.length > 0 && e.attemptId === s.attemptId) {
+          return s;
         }
-        return WaitState.of(WaitPhase.Streaming, e.value, '', s.clientMessageId);
+        return WaitMachine.stream(s, WaitPhase.Streaming, '', e.attemptId);
+      case WaitKind.Delta:
+        if (s.settled || s.endedAt > 0 || (e.attemptId.length > 0 && e.attemptId !== s.attemptId)) {
+          return s;
+        }
+        return WaitMachine.stream(s, WaitPhase.Streaming, StreamText.merge(s.text, e.value), s.attemptId);
       case WaitKind.StreamEnd:
-        return new WaitState();
+        if (s.phase !== WaitPhase.Streaming || s.settled ||
+          (e.attemptId.length > 0 && e.attemptId !== s.attemptId)) {
+          return s;
+        }
+        // A delayed durable message replaces this bubble; end alone is not a saved reply.
+        return WaitMachine.stream(s, WaitPhase.Streaming, s.text, s.attemptId, Date.now());
       case WaitKind.BotMessage:
-        return s.phase === WaitPhase.Streaming ? s : new WaitState();
+      case WaitKind.Dismiss:
+        return WaitMachine.stream(s, WaitPhase.Idle, '', s.attemptId, 0, true);
       default:
         return new WaitState();
     }
@@ -271,7 +267,7 @@ export class ChatListLogic {
       if (c.kind === kind && c.id === id && c.unread !== 0) {
         const n: ChatEntry = {
           kind: c.kind, id: c.id, name: c.name, color: c.color, main: c.main, preview: c.preview,
-          lastAt: c.lastAt, unread: 0, running: c.running, members: c.members
+          lastAt: c.lastAt, unread: 0, running: c.running, members: c.members, seq: c.seq
         };
         return n;
       }

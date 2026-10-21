@@ -5872,9 +5872,7 @@ function ConnectPlugins({ wide, actions }) {
       },
       (0, import_react10.createElement)(PlugIcon),
       t("Connect plugins")
-
     )
-
   );
 }
 function YouAvatar() {

@@ -95,7 +95,6 @@ var ZH = {
   "Bot list": "Bot 列表",
   "Setting up your Main Bot…": "正在设置你的主 Bot…",
   "Connect plugins": "连接插件",
-  "Plugin compatibility is not fully verified.": "插件兼容性未完全验证",
   "Automation tasks": "自动化任务",
   Connectors: "连接器",
   "Search connectors": "搜索连接器",
@@ -2278,9 +2277,8 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 .bt-connect:hover{background:var(--bt-hover)}
 .bt-connect svg{flex:none;width:15px;height:15px}
 .bt-connect-wrap{position:relative;display:flex;flex:1 1 auto;min-width:0}
-.bt-connect-tip{position:fixed;box-sizing:border-box;width:max-content;max-width:260px;padding:8px 12px;border-radius:10px;background:var(--bt-main);border:.5px solid var(--bt-line-2);box-shadow:0 8px 24px -4px rgba(0,0,0,.14);color:var(--bt-ink);font-size:12px;line-height:17px;white-space:normal;text-align:center;z-index:70;transform-origin:bottom left;animation:bt-tip-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing}}
-@keyframes bt-tip-in{from{opacity:0;transform:scale(.96);filter:blur(4px)}}
-@media (prefers-reduced-motion:reduce){.bt-connect-tip{animation:none}}
+
+
 
 .bt-head{position:relative;display:flex;justify-content:center;align-items:center;height:40px;flex:none;pointer-events:none}
 .bt-pill{pointer-events:auto;display:inline-flex;align-items:center;gap:8px;height:40px;padding:7.5px 13.5px 7.5px 7.5px;border-radius:999px;background:var(--bt-main);border:.5px solid var(--bt-line-2);box-shadow:0 2px 8px -1px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);color:var(--bt-ink);font-family:inherit;font-size:14px;line-height:20px;cursor:pointer;max-width:70%;box-sizing:border-box;transition:background-color .12s ease,transform ${SPRING_TAP.duration}ms ${SPRING_TAP.easing}}
@@ -2446,6 +2444,12 @@ button.bt-q-opt:active{background:var(--bt-active)}
 .bt-send:disabled{opacity:.35;cursor:default}
 .bt-error{padding:0 14px 10px;color:var(--bt-danger);font-size:12px}
 
+/* Side panels keep their content clear of the Windows caption buttons. A host may set the
+   chrome top to 0 so that dialog masks also cover the caption band; the panel then reaches
+   the top edge, its own surface under the buttons, and the band over it still drags the
+   window. Where the chrome top already clears the title bar the band is 0. */
+html[data-windows-titlebar]:not([data-fullscreen]) :is(.bt-pane,.bt-panel){--bt-caption-band:calc(var(--dsh-windows-titlebar-height,0px) - var(--dsh-frame-chrome-top,0px));padding-top:var(--bt-caption-band)}
+html[data-windows-titlebar]:not([data-fullscreen]) :is(.bt-pane,.bt-panel)::before{content:"";position:absolute;top:0;left:0;right:0;height:var(--bt-caption-band);-webkit-app-region:drag}
 .bt-pane{position:fixed;top:var(--dsh-frame-chrome-top,0px);right:0;bottom:0;z-index:45;pointer-events:auto;background:var(--bt-main);color:var(--bt-ink);display:flex;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
 .bt-dialog{flex:1;display:flex;flex-direction:column;min-width:0}
 .bt-dialog .bt-head{height:62px}
@@ -2936,6 +2940,9 @@ body[data-ds-dark-theme] .bt-theme-chip i{background:var(--da)}
 `;
 var CONVERSATION_CSS = `
 .bt-think{font-size:13px;line-height:18px;color:var(--bt-ink-2);margin:2px 0 4px;max-width:min(560px,78%)}
+.bt-think summary{cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:6px}
+.bt-think summary::-webkit-details-marker{display:none}
+.bt-think-time{font-variant-numeric:tabular-nums;white-space:nowrap}
 /* Five lines of the 18px line height; the rest scrolls inside the box. */
 .bt-think-text{white-space:pre-wrap;overflow-wrap:anywhere;margin-top:6px;padding-left:10px;border-left:2px solid var(--bt-line-2);max-height:90px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;outline:none}
 .bt-think-text:focus-visible{border-left-color:var(--bt-ink-2)}
@@ -4186,11 +4193,12 @@ var SECRET_CSS = `
 // src/client/turn-reasoning.js
 function turnReasoning(steps, current) {
   const members = steps.length ? steps : [current];
-  if (members.find((step) => stepReasoning(step) !== "")?.step !== current.step) return "";
-  return members.filter((step) => !thinkingLive(step)).map(stepReasoning).filter(Boolean).join("\n\n");
+  if (members.findLast((step) => stepReasoning(step) !== "")?.step !== current.step) return "";
+  return members.map(stepReasoning).filter(Boolean).join("\n\n");
 }
-var texts = (step) => step.blocks.filter((block) => block.kind === "text" && block.text.trim() !== "");
+var thinkingStep = (steps) => steps.find(thinkingLive);
 var thinkingLive = (step) => step.status === "running" && texts(step).length === 0 && step.blocks.some((block) => block.kind === "reasoning");
+var texts = (step) => step.blocks.filter((block) => block.kind === "text" && block.text.trim() !== "");
 var stepReasoning = (step) => step.blocks.filter((block) => block.kind === "reasoning").map((block) => block.text).join("\n").trim();
 
 // src/client/fold.js
@@ -4401,26 +4409,68 @@ function MessageTools({ text, name, sessionId, react, actions }) {
     ), document.body) : null
   );
 }
-function ThinkingRow({ text }) {
+var thinkingTimes = /* @__PURE__ */ new Map();
+function useThinkingMs({ sessionId, turn, settledSteps, skip }) {
+  const key = `${sessionId}:${turn}:${settledSteps}`;
+  const [ms, setMs] = (0, import_react8.useState)(() => thinkingTimes.get(key));
+  (0, import_react8.useEffect)(() => {
+    if (skip || thinkingTimes.has(key)) {
+      setMs(thinkingTimes.get(key));
+      return void 0;
+    }
+    const control = new AbortController();
+    call("thinking", { sessionId, turn }, control.signal).then((value) => {
+      thinkingTimes.set(key, value?.ms);
+      setMs(value?.ms);
+    }).catch(() => {
+    });
+    return () => control.abort();
+  }, [key, skip]);
+  return ms;
+}
+var rowViews = /* @__PURE__ */ new Map();
+function ThinkingRow({ text, live, at, ms, viewKey }) {
   const box = (0, import_react8.useRef)(null);
-  const atEnd = (0, import_react8.useRef)(true);
+  const view = (0, import_react8.useRef)(rowViews.get(viewKey));
+  const atEnd = (0, import_react8.useRef)(view.current?.atEnd ?? true);
+  const [open, setOpen] = (0, import_react8.useState)(view.current?.open ?? false);
   const [fade, setFade] = (0, import_react8.useState)(void 0);
+  const remember = (patch) => {
+    if (viewKey !== void 0) rowViews.set(viewKey, { ...rowViews.get(viewKey), ...patch });
+  };
   const measure = () => {
     const el = box.current;
     atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 2;
+    remember({ atEnd: atEnd.current, top: el.scrollTop });
     const above = el.scrollTop > 0;
     setFade(above && !atEnd.current ? "both" : above ? "top" : !atEnd.current ? "bottom" : void 0);
   };
+  const toggle = (event) => {
+    const next = event.currentTarget.open;
+    if (next) atEnd.current = true;
+    remember({ open: next });
+    setOpen(next);
+  };
   (0, import_react8.useLayoutEffect)(() => {
+    if (!open) return;
     const el = box.current;
+    const restore = view.current;
+    view.current = void 0;
     if (atEnd.current) el.scrollTop = el.scrollHeight;
+    else if (restore?.top !== void 0) el.scrollTop = restore.top;
     measure();
-  }, [text]);
-  const title = t("Thought it through");
+  }, [text, open]);
+  const title = live ? t("Thinking") : t("Thought it through");
   return (0, import_react8.createElement)(
-    "div",
-    { className: "bt-think" },
-    (0, import_react8.createElement)("div", { className: "bt-think-title" }, title),
+    "details",
+    { className: "bt-think", open, onToggle: toggle },
+    (0, import_react8.createElement)(
+      "summary",
+      null,
+      title,
+      live && at !== void 0 ? (0, import_react8.createElement)(Elapsed, { at, className: "bt-think-time" }) : null,
+      !live && ms !== void 0 ? (0, import_react8.createElement)("span", { className: "bt-think-time" }, `· ${elapsedLabel(Math.max(1e3, ms))}`) : null
+    ),
     (0, import_react8.createElement)("div", { ref: box, className: "bt-think-text", role: "region", "aria-label": title, tabIndex: 0, "data-fade": fade, onScroll: measure }, text)
   );
 }
@@ -4443,9 +4493,13 @@ function AssistantCell({ node, groupPart, sessionId, openFile, fileMentions, use
   const hidden = Boolean(roster.roomsById[sessionId]) || isHiddenTurn(roster, sessionId, data.turn);
   const texts2 = groupPart === "reasoning" ? [] : data.blocks.filter((block) => block.kind === "text" && block.text.trim() !== "").map((block) => block.text);
   const running = data.status === "running";
-  useLiveNote(actions, sessionId, `text:${node.key ?? data.seq}`, !hidden && running && texts2.length > 0 ? { text: true } : null);
-  if (hidden) return null;
+  const members = steps.length ? steps : [data];
   const reasoning = groupPart === "response" ? "" : turnReasoning(steps, data);
+  const thinking = groupPart === "response" ? void 0 : thinkingStep(members);
+  const ms = useThinkingMs({ sessionId, turn: data.turn, settledSteps: members.filter((step) => step.status !== "running").length, skip: hidden || reasoning === "" });
+  useLiveNote(actions, sessionId, `text:${node.key ?? data.seq}`, !hidden && running && texts2.length > 0 ? { text: true } : null);
+  useLiveNote(actions, sessionId, `think:${node.key ?? data.seq}`, !hidden && thinking !== void 0 && reasoning !== "" ? { text: true } : null);
+  if (hidden) return null;
   const relays = relayPart(data, groupPart) ? relaysBefore(contexts, steps, data) : [];
   if (texts2.length === 0 && !reasoning && relays.length === 0) return null;
   const selfId = roster.byId[sessionId]?.id ?? sessionId;
@@ -4465,7 +4519,14 @@ function AssistantCell({ node, groupPart, sessionId, openFile, fileMentions, use
         whole: true
       });
     }),
-    reasoning ? (0, import_react8.createElement)(ThinkingRow, { text: reasoning }) : null,
+    reasoning ? (0, import_react8.createElement)(ThinkingRow, {
+      text: reasoning,
+      live: thinking !== void 0,
+      viewKey: `${sessionId}:${data.turn}`,
+      // The live clock counts the settled steps too: backing `at` by the settled
+      // time makes one Elapsed show settled + running.
+      ...thinking !== void 0 ? { at: typeof thinking.time === "number" ? thinking.time - (ms ?? 0) : void 0 } : { ms }
+    }) : null,
     texts2.length ? (0, import_react8.createElement)(Bubbles, { texts: texts2, roster, selfId, actions, streaming: running, sessionId, msgKey: `${sessionId}:${data.turn}:${node.key ?? data.seq ?? ""}`, useUi, mentions, fold: FOLD_HUGE }) : null
   );
 }
@@ -5781,51 +5842,22 @@ function UpdateButton({ useUpdate, actions }) {
   );
 }
 function ConnectPlugins({ wide, actions }) {
-  const tipId = (0, import_react10.useId)();
-  const [tip, setTip] = (0, import_react10.useState)(false);
-  const timer = (0, import_react10.useRef)(0);
-  const button = (0, import_react10.useRef)(null);
-  const [box, setBox] = (0, import_react10.useState)(null);
-  (0, import_react10.useEffect)(() => () => clearTimeout(timer.current), []);
   if (!wide) return null;
-  const show = () => {
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      const rect = button.current?.getBoundingClientRect();
-      if (!rect) return;
-      const left = Math.max(8, Math.min(rect.left, window.innerWidth - 268));
-      setBox({ left, bottom: window.innerHeight - rect.top + 10 });
-      setTip(true);
-    }, 250);
-  };
-  const hide = () => {
-    clearTimeout(timer.current);
-    setTip(false);
-  };
   return (0, import_react10.createElement)(
     "span",
     { className: "bt-connect-wrap" },
     (0, import_react10.createElement)(
       "button",
       {
-        ref: button,
         type: "button",
         className: "bt-connect bt-connect-foot",
-        "aria-describedby": tip ? tipId : void 0,
-        onMouseEnter: show,
-        onMouseLeave: hide,
-        onFocus: show,
-        onBlur: hide,
         onClick: () => actions.selectPanel("plugins")
       },
       (0, import_react10.createElement)(PlugIcon),
       t("Connect plugins")
-    ),
-    tip && box ? (0, import_react_dom3.createPortal)((0, import_react10.createElement)(
-      "span",
-      { role: "tooltip", id: tipId, className: "bt-connect-tip", style: box },
-      t("Plugin compatibility is not fully verified.")
-    ), document.body) : null
+
+    )
+
   );
 }
 function YouAvatar() {
@@ -13372,7 +13404,7 @@ var BROWSER_CSS = `
 .bt-ptab-new svg{width:15px;height:15px}
 .bt-ptab-ind{position:absolute;top:4px;bottom:4px;border-radius:9px;background:var(--bt-hover);opacity:0;pointer-events:none;z-index:0;transition:opacity .15s ease}
 .bt-ptab-close{flex:none;margin-left:2px}
-.bt-panel-ghost{position:absolute;top:44px;right:0;bottom:0;overflow:hidden;pointer-events:none;z-index:2}
+.bt-panel-ghost{position:absolute;top:calc(44px + var(--bt-caption-band,0px));right:0;bottom:0;overflow:hidden;pointer-events:none;z-index:2}
 .bt-panel-ghost>.bt-panel-view{position:absolute;inset:0}
 .bt-panel-view{flex:1;min-height:0;display:flex;flex-direction:column;animation:bt-panel-view-in .22s cubic-bezier(.16,1,.3,1)}
 @keyframes bt-panel-view-in{from{opacity:0}}

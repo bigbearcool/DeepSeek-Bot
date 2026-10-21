@@ -75,7 +75,6 @@ cd dsh-mobile-android
 - **主 Bot 建 Bot 时按角色匹配预设**（`2dbd991`）。
 - **等待卡片适配 DSH 0.2.1-rc.2 的聊天 DOM**（`32c4b37`，`ds-bot/client.js`）。
 - 清理新测试里未用的变量（`754993f`）。
-- **ds-bot 0.1.9：去掉「连接插件」的红色叹号角标**（`c2d8378`，`ds-bot/client.js`、`src/client/sidebar.js`、`src/client/styles.js`）。
 - **移除预设里的 `{{cwd}}` 提示词变量**：避免群聊轮次报 `unknown prompt variable`。
 - **新增手机端**：`dsh-mobile-bridge/`（DSH 插件）和 `dsh-mobile-android/`（Android App），见下方「手机 App」。
 - **新增鸿蒙原生 App**：`dsh-mobile-harmony/`（ArkTS + ArkUI），协议沿用 dsh-mobile-bridge，见下方「手机 App」。
@@ -84,6 +83,7 @@ cd dsh-mobile-android
 
 | 日期 | 合并提交 | 上游 PR |
 |---|---|---|
+| 2026-10-21 | `MERGE_SHA_PLACEHOLDER` | #381 推理行默认折叠，并去掉「连接插件」常亮警告角标<br>#383 思考中显示推理行与用时<br>#392 侧栏避开 Windows caption；推理行在实时回合中保持展开，并显示最后一步推理<br>#396 Bot 侧栏顶到 caption 按钮下沿，并同步偏移 outgoing 视图<br>#399 补全 0.2.0 changelog |
 | 2026-10-20 | `524c9ae` | #375 首次运行导入时连同链接一起复制旧的团队工作区，导入只跳过确实复制不了的内容<br>#377 桌面窗口改从 Host 的本机回环地址加载（修复应用内登录），check-update 等待 Host 时也能找到窗口，弹窗遮罩同时盖住标题栏和按钮 |
 | 2026-10-20 | `37b58ba` | #370 打开 Bot 对话时直接定位到最新消息<br>#371 从其他会话视图恢复返回聊天的入口<br>#374 窄屏下选中会话后自动收起侧栏，重复导航时保持收起<br>#372 聊天历史加载期间等待卡片保持可用，交接时保留卡片里已填的输入 |
 | 2026-10-20 | `053ef42` | #366 可在 DS Bot 设置里修改团队工作区和数据位置（桌面应用可迁移数据目录）<br>#367 发布 0.2.0：版本号、changelog 和桌面应用安装说明<br>#368 普通会话引导使用可用的提问工具<br>#369 转发消息正文里不再带方括号的 Bot 名 |

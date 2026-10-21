@@ -91,7 +91,7 @@ export function searchHits(q, rows, max = 30) {
 function publicBot(bot = {}) {
   return {
     id: bot.id, name: bot.name, role: bot.role ?? null, sessionId: bot.sessionId ?? bot.id,
-    model: bot.model ?? null, agentPreset: bot.agentPreset ?? null, color: bot.color ?? null,
+    model: bot.model ?? null, effort: bot.effort || null, agentPreset: bot.agentPreset ?? null, color: bot.color ?? null,
     shape: bot.avatar?.shape ?? null, main: false,
   }
 }

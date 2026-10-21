@@ -15,15 +15,18 @@ function method(start, end) {
 }
 const source = `
 import { ChatMerge, WaitMachine, WaitState, WaitPhase, WaitKind, WaitEvent, LiveTimers, LaunchRouter, ChatListLogic } from './common/ChatLogic';
-import { parseChatItem } from './common/Models';
+import { parseChatItem, parseProfile } from './common/Models';
 import { J } from './common/Json';
 import { ReadReceipts } from './common/ReadReceipts';
 import { NotifyLogic, ChatPrefs } from './common/Extra';
 import { roomTitle } from './common/Look';
+const friendly = e => e.message;
 const Notifier = { show() {}, clear() {} };
 import { RoomStreams, RoomRound } from './common/Group';
 export { WaitPhase };
 export class Page {
+  profile = null; profileGeneration = 0; profileEffortRequest = 0; profileSaving = false; profileEfforts = []; profileDefaultEffort = null;
+  profileEffortsLoading = false; profileEffortsError = ''; profileBack = ''; options = null; formError = '';
   openKind = 'bot'; openId = 'a'; screen = 'chat'; messages = []; live = []; foreground = true;
   chats = []; notice = ''; readReceipts = new ReadReceipts();
   store = null; bots = []; rooms = []; approvals = []; seen = null; prefs = new ChatPrefs(); offline = false; listGeneration = 0;
@@ -33,6 +36,7 @@ export class Page {
   sseAttempt = 0; lastEventAt = 0;
   sse = { url: '', close() { this.url = ''; }, open(url, token, onEvent, onClose) { this.url = url; } };
   startStallCheck() {} scrollEnd() {} toast(text) {} fail(e) { throw e; }
+  ${method('  private async loadOptions()', '  // ---------- new Bot ----------')}
   ${method('  private invalidateChat()', '  async openChat(')}
   ${method('  async refreshList()', '  // ---------- chat ----------')}
   ${method('  closeChat()', '  private async markRead()')}
@@ -192,4 +196,114 @@ test('a background chat page does not hide its unread badge', async () => {
   p.auth = { with:block => block('mock',api) };
   await p.refreshList();
   assert.equal(p.chats[0].unread, 1);
+});
+
+const profile = (id = 'a', model = 'provider/one', effort = 'high') => ({
+  id, name: id, role: '', instructions: '', shape: null, color: null, main: false, model, effort
+});
+const catalog = { efforts: [{ id: 'low', name: '低' }, { id: 'high', name: '高' }], defaultEffort: 'low' };
+const tick = () => new Promise(resolve => setImmediate(resolve));
+
+test('profile loads stored effort and model defaults, then saves and clears an override', async () => {
+  const p = new Page(); let stored = profile(); const writes = [];
+  const api = { botOptions: async () => ({ models: [] }), botInfo: async () => stored,
+    effortCatalog: async () => catalog,
+    updateBot: async (t, body) => { writes.push(body); stored = { ...stored, effort: body.effort || null }; return stored; } };
+  p.auth = { with: fn => fn('test', api) };
+  await p.openProfile('a', 'chat');
+  assert.equal(p.profileEffortName(), '高');
+  p.setProfileEffort('low'); await tick();
+  assert.deepEqual(writes[0], { id: 'a', effort: 'low' });
+  assert.equal(p.profile.effort, 'low');
+  p.setProfileEffort(''); await tick();
+  assert.equal(p.profileEffortName(), '模型默认（低）');
+  await p.openProfile('a', 'chat'); assert.equal(p.profile.effort, null);
+});
+
+test('model switch resets override and loads only the new models capabilities', async () => {
+  const p = new Page(); p.profile = profile(); p.screen = 'profile'; p.profileEfforts = catalog.efforts;
+  const writes = [];
+  p.auth = { with: fn => fn('test', {
+    updateBot: async (t, body) => { writes.push(body); return profile('a', body.model, null); },
+    effortCatalog: async () => ({ efforts: [], defaultEffort: null })
+  }) };
+  p.setModel('provider/plain'); await tick();
+  assert.deepEqual(writes[0], { id: 'a', model: 'provider/plain', effort: '' });
+  assert.deepEqual(p.profileEfforts, []);
+  p.setProfileEffort('high'); await tick(); assert.equal(writes.length, 1);
+});
+
+test('late effort request for an old model cannot replace new model options', async () => {
+  const p = new Page(); p.profile = profile(); p.screen = 'profile'; let release;
+  p.auth = { with: fn => fn('test', { effortCatalog: (t, ref) => ref === 'provider/one'
+    ? new Promise(resolve => { release = resolve; }) : Promise.resolve({ efforts: [], defaultEffort: null }) }) };
+  const old = p.loadProfileEfforts();
+  p.profile = profile('a', 'provider/plain', null); await p.loadProfileEfforts();
+  release(catalog); await old;
+  assert.deepEqual(p.profileEfforts, []); assert.equal(p.profileEffortsLoading, false);
+});
+
+test('load and save failures retain previous selection and allow retry', async () => {
+  const p = new Page(); p.profile = profile(); p.screen = 'profile'; let fail = true;
+  p.auth = { with: fn => fn('test', {
+    effortCatalog: async () => { if (fail) throw new Error('offline'); return catalog; },
+    updateBot: async () => { throw new Error('refused'); }
+  }) };
+  await p.loadProfileEfforts(); assert.equal(p.profileEffortsError, 'offline');
+  fail = false; await p.loadProfileEfforts(); assert.equal(p.profileEffortsError, '');
+  p.setProfileEffort('low'); await tick();
+  assert.equal(p.profile.effort, 'high'); assert.equal(p.formError, 'refused'); assert.equal(p.profileSaving, false);
+});
+
+test('old profile saves cannot overwrite another assistants page', async () => {
+  const p = new Page(); p.profile = profile(); p.screen = 'profile'; let release;
+  p.auth = { with: fn => fn('test', {
+    botOptions: async () => ({ models: [] }), botInfo: async (t, id) => profile(id), effortCatalog: async () => catalog,
+    updateBot: async () => new Promise(resolve => { release = resolve; })
+  }) };
+  const saving = p.saveProfile({ effort: 'low' });
+  await p.openProfile('b', 'roominfo'); release(profile('a', 'provider/one', 'low')); await saving;
+  assert.equal(p.profile.id, 'b'); assert.equal(p.profile.effort, 'high');
+});
+
+test('late profile read cannot overwrite a newer opened assistant', async () => {
+  const p = new Page(); let release;
+  p.auth = { with: fn => fn('test', { botOptions: async () => ({ models: [] }),
+    botInfo: (t, id) => id === 'a' ? new Promise(resolve => { release = resolve; }) : Promise.resolve(profile(id)),
+    effortCatalog: async () => catalog }) };
+  const first = p.openProfile('a', 'chat'); await p.openProfile('b', 'chat');
+  release(profile()); await first; assert.equal(p.profile.id, 'b');
+});
+
+test('a stale same-model capability failure cannot erase a successful retry', async () => {
+  const p = new Page(); p.profile = profile(); p.screen = 'profile'; let reject; let calls = 0;
+  p.auth = { with: fn => fn('test', { effortCatalog: () => ++calls === 1
+    ? new Promise((resolve, fail) => { reject = fail; }) : Promise.resolve(catalog) }) };
+  const first = p.loadProfileEfforts(); await p.loadProfileEfforts(); reject(new Error('old error')); await first;
+  assert.equal(p.profileEffortsError, ''); assert.deepEqual(p.profileEfforts, catalog.efforts);
+});
+
+test('repeated taps while saving do not send competing effort updates', async () => {
+  const p = new Page(); p.profile = profile(); p.screen = 'profile'; p.profileEfforts = catalog.efforts;
+  let release; let writes = 0;
+  p.auth = { with: fn => fn('test', { updateBot: () => { writes++; return new Promise(resolve => { release = resolve; }); } }) };
+  p.setProfileEffort('low'); p.setProfileEffort('');
+  assert.equal(writes, 1); release(profile('a', 'provider/one', 'low')); await tick();
+  assert.equal(p.profile.effort, 'low'); assert.equal(p.profileSaving, false);
+});
+
+test('dropdown indices follow saved model and effort, with default first and unavailable models excluded', () => {
+  const p = new Page(); p.profile = profile();
+  p.options = { models: [
+    { ref: 'provider/locked', name: 'Locked', needsKey: true },
+    { ref: 'provider/one', name: 'One', needsKey: false },
+    { ref: 'provider/plain', name: 'Plain', needsKey: false }
+  ] };
+  p.profileEfforts = catalog.efforts;
+  assert.equal(p.profileModelIndex(), 0);
+  assert.equal(p.profileModels().length, 2);
+  assert.deepEqual(p.profileEffortOptions().map(x => x.value), ['模型默认', '低', '高']);
+  assert.equal(p.profileEffortIndex(), 2);
+  p.profile.effort = null; assert.equal(p.profileEffortIndex(), 0);
+  p.profile.effort = 'unknown'; assert.equal(p.profileEffortIndex(), -1);
 });

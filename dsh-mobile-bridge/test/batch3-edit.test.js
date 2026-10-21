@@ -12,7 +12,7 @@ const P = '/api/mobile-bridge/v1'
 const STATE = {
   version: 1, mainBotIds: ['chief'],
   bots: {
-    chief: { id: 'chief', name: 'Chief', sessionId: 'sess-chief', color: 'blue', avatar: { shape: 'whale' }, instructions: '只说中文' },
+    chief: { id: 'chief', name: 'Chief', sessionId: 'sess-chief', color: 'blue', avatar: { shape: 'whale' }, instructions: '只说中文', model: 'provider/reason', effort: 'high' },
     writer: { id: 'writer', name: 'Writer', sessionId: 'sess-writer' },
   },
   rooms: { 'room-1': { id: 'room-1', name: '周会', members: ['chief'], seq: 2, log: [{ who: 'User', text: '本周预算多少', seq: 1 }, { who: 'Chief', botId: 'chief', text: '预算是 3 万', seq: 2 }] } },
@@ -90,6 +90,9 @@ test('bots/info returns instructions, the 20 shapes and 12 colors; unknown is 40
   assert.equal(ok.body.bot.instructions, '只说中文')
   assert.equal(ok.body.bot.shape, 'whale')
   assert.equal(ok.body.bot.main, true)
+  assert.equal(ok.body.bot.effort, 'high')
+  const plain = await h.json('GET', '/bots/info?id=writer', { headers })
+  assert.equal(plain.body.bot.effort, null)
   assert.equal(ok.body.shapes.length, 20)
   assert.equal(ok.body.colors.length, 12)
   assert.equal((await h.json('GET', '/bots/info?id=nope', { headers })).status, 404)
@@ -126,4 +129,15 @@ test('search finds group messages', async (t) => {
   assert.equal(r.body.hits.length, 2)
   assert.equal(r.body.hits[0].kind, 'room')
   assert.equal(r.body.hits[0].who, 'Chief')
+})
+
+test('bots/update returns the saved thinking override and supports resetting to model default', async (t) => {
+  const h = start(); t.after(h.stop)
+  const headers = await authed(h)
+  for (const effort of ['low', '']) {
+    const saved = await h.json('POST', '/bots/update', { headers, body: { id: 'chief', effort } })
+    assert.equal(saved.status, 200)
+    assert.equal(saved.body.bot.effort, effort || null)
+    assert.deepEqual(h.calls.at(-1), { endpoint: 'update-bot', payload: { id: 'chief', effort } })
+  }
 })

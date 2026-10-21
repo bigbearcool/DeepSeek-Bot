@@ -156,6 +156,11 @@ export interface FolderListing {
   entries: FolderOption[];
 }
 
+export interface EffortCatalog {
+  efforts: EffortOption[];
+  defaultEffort: string | null;
+}
+
 export interface BotProfile {
   id: string;
   name: string;
@@ -165,6 +170,7 @@ export interface BotProfile {
   color: string | null;
   main: boolean;
   model: string | null;
+  effort: string | null;
 }
 
 export interface SearchHit {
@@ -392,7 +398,8 @@ export function parseProfile(o: JObj): BotProfile {
     shape: J.str(o, 'shape'),
     color: J.str(o, 'color'),
     main: J.bool(o, 'main', false),
-    model: J.str(o, 'model')
+    model: J.str(o, 'model'),
+    effort: J.str(o, 'effort')
   };
   return p;
 }

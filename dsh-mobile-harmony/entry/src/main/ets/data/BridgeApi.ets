@@ -3,7 +3,7 @@ import { http } from '@kit.NetworkKit';
 import { J, JObj } from '../common/Json';
 import { BridgeError } from '../common/Errors';
 import {
-  BotInfo, BotOptions, BotProfile, ChatListResponse, EffortOption, FolderListing, HistoryResponse, NewBotDraft,
+  BotInfo, BotOptions, BotProfile, ChatListResponse, EffortCatalog, EffortOption, FolderListing, HistoryResponse, NewBotDraft,
   NewRoomDraft, RoomInfo, SearchHit, SendResponse, TeamResponse, UploadResult, botDraftBody, parseBot, parseBotOptions,
   parseChatItem, parseChatList, parseFolderListing, parseHistory, parseHits, parseProfile, parseRoom, parseTeam,
   parseUpload, ChatItem
@@ -217,11 +217,18 @@ export class BridgeApi {
   }
 
   async efforts(token: string, ref: string): Promise<EffortOption[]> {
+    return (await this.effortCatalog(token, ref)).efforts;
+  }
+
+  async effortCatalog(token: string, ref: string): Promise<EffortCatalog> {
     const o = await this.getJson('/bots/efforts?ref=' + enc(ref), token);
-    return J.objs(o, 'efforts').map((x: JObj) => {
-      const e: EffortOption = { id: J.strOr(x, 'id', ''), name: J.strOr(x, 'name', J.strOr(x, 'id', '')) };
-      return e;
-    });
+    return {
+      efforts: J.objs(o, 'efforts').map((x: JObj) => {
+        const e: EffortOption = { id: J.strOr(x, 'id', ''), name: J.strOr(x, 'name', J.strOr(x, 'id', '')) };
+        return e;
+      }),
+      defaultEffort: J.str(o, 'defaultEffort')
+    };
   }
 
   async listFolder(token: string, path: string): Promise<FolderListing> {
@@ -259,6 +266,9 @@ export class BridgeApi {
     const b = J.obj(o, 'bot');
     if (b === null) {
       throw new BridgeError('no bot', 404);
+    }
+    if (b['effort'] === undefined) {
+      throw new BridgeError('Bridge update required', 409, '请更新电脑端桥接插件，以读取和修改当前思考模式');
     }
     return parseProfile(b);
   }

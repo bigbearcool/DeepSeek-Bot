@@ -190,3 +190,5 @@ All need the device token (401 without it).
 - `POST /chats/send` and `/rooms/send` take `attachments: [uploadId…]`; text may be empty then. An upload made for another chat, already used or expired is refused with 400 「附件已过期，请重新添加」. A group message with attachments is queued on the group's session the way the desktop does; without attachments it still goes through ds-bot `send`.
 - Message items (history, live stream) carry `attachments: [{ type, id, name, bytes, mediaType, width, height }]`. Group lines show files and pictures from ds-bot's `[File …]` / `[Image …]` lines; pictures are matched to the group session's stored refs.
 - `GET /attachments?id=<id>` — the bytes, only for an id this bridge has already shown to a phone.
+
+助手资料与保存响应中的 `bot.effort` 返回当前思考档位覆盖，无覆盖时为 `null`。手机通过 `/bots/efforts?ref=...` 查询模型支持的档位及默认档位；保存 `effort: ""` 恢复模型默认，具体合法性由 ds-bot 校验。

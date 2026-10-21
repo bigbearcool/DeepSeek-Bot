@@ -77,6 +77,13 @@ struct Index {
   @State options: BotOptions | null = null;
   @State efforts: EffortOption[] = [];
   @State botDraft: NewBotDraft = new NewBotDraft();
+  @State profileEfforts: EffortOption[] = [];
+  @State profileDefaultEffort: string | null = null;
+  @State profileEffortsLoading: boolean = false;
+  @State profileEffortsError: string = '';
+  @State profileSaving: boolean = false;
+  private profileGeneration: number = 0;
+  private profileEffortRequest: number = 0;
   @State profileBack: string = 'chat';
   @State searchQ: string = '';
   @State searchHits: SearchHit[] = [];
@@ -1146,25 +1153,79 @@ struct Index {
     if (this.auth === null) {
       return;
     }
+    const generation = ++this.profileGeneration;
     this.profileBack = back;
     this.profile = null;
+    this.profileEfforts = [];
+    this.profileDefaultEffort = null;
+    this.profileEffortsError = '';
+    this.profileEffortsLoading = false;
+    this.profileSaving = false;
     this.formError = '';
     this.screen = 'profile';
     this.loadOptions();
     try {
-      this.profile = await this.auth.with((t: string, api: BridgeApi) => api.botInfo(t, id));
+      const profile = await this.auth.with((t: string, api: BridgeApi) => api.botInfo(t, id));
+      if (generation !== this.profileGeneration || this.screen !== 'profile') {
+        return;
+      }
+      this.profile = profile;
+      await this.loadProfileEfforts();
     } catch (e) {
-      this.formError = friendly(e as Object);
+      if (generation === this.profileGeneration && this.screen === 'profile') {
+        this.formError = friendly(e as Object);
+      }
+    }
+  }
+
+  private async loadProfileEfforts(): Promise<void> {
+    const p = this.profile;
+    if (this.auth === null || p === null) {
+      return;
+    }
+    const generation = this.profileGeneration;
+    const request = ++this.profileEffortRequest;
+    const ref = p.model ?? '';
+    this.profileEfforts = [];
+    this.profileDefaultEffort = null;
+    this.profileEffortsError = '';
+    this.profileEffortsLoading = ref.length > 0;
+    if (!this.profileEffortsLoading) {
+      return;
+    }
+    try {
+      const catalog = await this.auth.with((t: string, api: BridgeApi) => api.effortCatalog(t, ref));
+      if (generation === this.profileGeneration && request === this.profileEffortRequest && this.screen === 'profile' && this.profile?.model === ref) {
+        this.profileEfforts = catalog.efforts;
+        this.profileDefaultEffort = catalog.defaultEffort;
+      }
+    } catch (e) {
+      if (generation === this.profileGeneration && request === this.profileEffortRequest && this.screen === 'profile' && this.profile?.model === ref) {
+        this.profileEffortsError = friendly(e as Object);
+      }
+    } finally {
+      if (generation === this.profileGeneration && request === this.profileEffortRequest && this.screen === 'profile' && this.profile?.model === ref) {
+        this.profileEffortsLoading = false;
+      }
     }
   }
 
   private async saveProfile(body: JObj): Promise<void> {
-    if (this.auth === null || this.profile === null) {
+    if (this.auth === null || this.profile === null || this.profileSaving) {
       return;
     }
-    body['id'] = this.profile.id;
+    const generation = this.profileGeneration;
+    const id = this.profile.id;
+    const model = this.profile.model;
+    body['id'] = id;
+    this.profileSaving = true;
+    this.formError = '';
     try {
-      this.profile = await this.auth.with((t: string, api: BridgeApi) => api.updateBot(t, body));
+      const updated = await this.auth.with((t: string, api: BridgeApi) => api.updateBot(t, body));
+      if (generation !== this.profileGeneration || this.screen !== 'profile' || this.profile?.id !== id) {
+        return;
+      }
+      this.profile = updated;
       this.formError = '已保存';
       const p = this.profile;
       if (p !== null) {
@@ -1182,15 +1243,69 @@ struct Index {
           this.openName = p.name;
         }
       }
+      if (updated.model !== model) {
+        await this.loadProfileEfforts();
+      }
     } catch (e) {
-      this.formError = friendly(e as Object);
+      if (generation === this.profileGeneration && this.screen === 'profile') {
+        this.formError = friendly(e as Object);
+      }
+    } finally {
+      if (generation === this.profileGeneration) {
+        this.profileSaving = false;
+      }
     }
   }
 
   private setModel(ref: string): void {
     const b: JObj = {};
     b['model'] = ref;
+    b['effort'] = ''; // A new model starts with its own default, never another model's override.
     this.saveProfile(b);
+  }
+
+  private setProfileEffort(id: string): void {
+    if (this.profileEffortsLoading || this.profileEffortsError.length > 0 || this.profile === null ||
+      this.profile.model === null || (id.length > 0 && !this.profileEfforts.some((e: EffortOption) => e.id === id))) {
+      return;
+    }
+    const b: JObj = {};
+    b['effort'] = id;
+    this.saveProfile(b);
+  }
+
+  private profileModels(): ModelOption[] {
+    return (this.options?.models ?? []).filter((m: ModelOption) => !m.needsKey || m.ref === this.profile?.model);
+  }
+
+  private profileModelIndex(): number {
+    return this.profileModels().findIndex((m: ModelOption) => m.ref === this.profile?.model);
+  }
+
+  private profileEffortOptions(): SelectOption[] {
+    const options: SelectOption[] = [{ value: '模型默认' }];
+    for (const effort of this.profileEfforts) {
+      options.push({ value: effort.name });
+    }
+    return options;
+  }
+
+  private profileEffortIndex(): number {
+    const effort = this.profile?.effort;
+    if (effort === null || effort === undefined || effort.length === 0) {
+      return 0;
+    }
+    const index = this.profileEfforts.findIndex((e: EffortOption) => e.id === effort);
+    return index < 0 ? -1 : index + 1;
+  }
+
+  private profileEffortName(): string {
+    const selected = this.profile?.effort;
+    if (selected !== null && selected !== undefined && selected.length > 0) {
+      return this.profileEfforts.find((e: EffortOption) => e.id === selected)?.name ?? selected;
+    }
+    const fallback = this.profileEfforts.find((e: EffortOption) => e.id === this.profileDefaultEffort);
+    return fallback === undefined ? '模型默认' : '模型默认（' + fallback.name + '）';
   }
 
   private modelName(ref: string | null): string {
@@ -1996,36 +2111,40 @@ struct Index {
                   this.saveProfile(b);
                 })
             }
-            this.Field('使用的模型：' + this.modelName(this.profile.model))
-            if (this.options !== null) {
-              ForEach(this.options.models, (m: ModelOption) => {
-                Row() {
-                  Column() {
-                    Text(m.name).fontSize(15).fontColor($r('app.color.text'))
-                    if (m.providerName !== null) {
-                      Text(m.providerName).fontSize(12).fontColor($r('app.color.sub'))
-                    }
-                  }
-                  .alignItems(HorizontalAlign.Start)
-                  .layoutWeight(1)
-                  if (this.profile?.model === m.ref) {
-                    Text('正在用').fontSize(13).fontColor($r('app.color.accent'))
-                  } else if (m.needsKey) {
-                    Text('需在电脑上设置').fontSize(12).fontColor($r('app.color.sub'))
-                  } else {
-                    Text('换成这个').fontSize(13).fontColor($r('app.color.accent'))
-                  }
+            this.Field('模型')
+            Select(this.profileModels().map((m: ModelOption): SelectOption => {
+              return { value: m.name + (m.providerName === null ? '' : ' · ' + m.providerName) };
+            }))
+              .selected(this.profileModelIndex())
+              .value(this.modelName(this.profile.model))
+              .width('100%').height(48)
+              .fontColor($r('app.color.text')).backgroundColor($r('app.color.card'))
+              .enabled(!this.profileSaving && this.profileModels().length > 0)
+              .onSelect((index: number) => {
+                const model = this.profileModels()[index];
+                if (model !== undefined && !model.needsKey && model.ref !== this.profile?.model) {
+                  this.setModel(model.ref);
                 }
-                .padding(10)
-                .borderRadius(10)
-                .backgroundColor($r('app.color.card'))
-                .width('100%')
-                .onClick(() => {
-                  if (!m.needsKey && this.profile?.model !== m.ref) {
-                    this.setModel(m.ref);
-                  }
-                })
-              }, (m: ModelOption) => m.ref)
+              })
+            this.Field('思考强度')
+            Select(this.profileEffortOptions())
+              .selected(this.profileEffortIndex())
+              .value(this.profileEffortsLoading ? '正在加载…' : (this.profileEffortsError.length > 0 ? '加载失败' :
+                (this.profileEfforts.length > 0 ? this.profileEffortName() :
+                  (this.profile.model === null ? '请先选择模型' : '此模型不提供思考强度设置'))))
+              .width('100%').height(48)
+              .fontColor($r('app.color.text')).backgroundColor($r('app.color.card'))
+              .enabled(!this.profileSaving && !this.profileEffortsLoading && this.profileEffortsError.length === 0 &&
+                this.profileEfforts.length > 0)
+              .onSelect((index: number) => {
+                const effort = index === 0 ? '' : this.profileEfforts[index - 1]?.id;
+                if (effort !== undefined) {
+                  this.setProfileEffort(effort);
+                }
+              })
+            if (this.profileEffortsError.length > 0) {
+              Text(this.profileEffortsError).fontSize(13).fontColor('#E5484D')
+              Button('重试加载思考强度').onClick(() => this.loadProfileEfforts())
             }
             this.Field('职责')
             TextInput({ text: this.profile.role }).onChange((v: string) => {
@@ -2055,6 +2174,7 @@ struct Index {
             }
           }
           .padding(16)
+          .enabled(!this.profileSaving)
         }
         .layoutWeight(1)
       }

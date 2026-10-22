@@ -33,6 +33,19 @@ export class ChatMerge {
     if (list.some((x: ChatItem) => ChatMerge.sameServerItem(x, incoming))) {
       return list;
     }
+    if (incoming.kind === 'bot' && incoming.turn !== null) {
+      const j = list.findIndex((x: ChatItem) => x.kind === 'bot' && x.turn !== null && x.turn === incoming.turn);
+      if (j >= 0) {
+        const out = list.slice();
+        const existing = list[j];
+        const incSeq = incoming.seq !== null ? incoming.seq : -1;
+        const exSeq = existing.seq !== null ? existing.seq : -1;
+        if (incSeq >= exSeq) {
+          out[j] = copyItem(incoming);
+        }
+        return out;
+      }
+    }
     const i = list.findIndex((x: ChatItem) => ChatMerge.matchesLocal(x, incoming));
     if (i >= 0) {
       const out = list.slice();

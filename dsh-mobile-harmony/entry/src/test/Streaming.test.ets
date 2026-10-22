@@ -47,6 +47,22 @@ export default function streamingTest() {
       s = WaitMachine.reduce(s, new WaitEvent(WaitKind.StreamStart, '', 'a'));
       expect(s.text).assertEqual('答案');
     });
+    it('mergeIncomingReplacesSameTurnBotByHigherSeq', 0, () => {
+      const older = newItem('bot', 'draft', 1);
+      older.seq = 10;
+      older.turn = 3;
+      const newer = newItem('bot', 'final', 2);
+      newer.seq = 11;
+      newer.turn = 3;
+      const out = ChatMerge.mergeIncoming([older], newer);
+      expect(out.length).assertEqual(1);
+      expect(out[0].text).assertEqual('final');
+      expect(out[0].seq).assertEqual(11);
+      const otherTurn = newItem('bot', 'next', 3);
+      otherTurn.seq = 12;
+      otherTurn.turn = 4;
+      expect(ChatMerge.mergeIncoming(out, otherTurn).length).assertEqual(2);
+    });
     it('historyCannotEraseNewerLiveMessageOrOlderPages', 0, () => {
       const old = newItem('bot', '旧页', 1); old.seq = 1;
       const newer = newItem('bot', '实时回复', 3); newer.seq = 3;

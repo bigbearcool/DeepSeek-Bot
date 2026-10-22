@@ -241,6 +241,32 @@ test('SSE stream forwards session message events', async (t) => {
   ac.abort()
 })
 
+test('SSE stream forwards assistant-stream start with turn', async (t) => {
+  const h = start({
+    bots: { chief: { id: 'chief', name: 'Chief', sessionId: 'sess-chief', createdAt: 1 } },
+  })
+  t.after(h.stop)
+  const headers = await authed(h)
+  const ac = new AbortController()
+  const res = await h.call('GET', '/api/mobile-bridge/v1/stream?botId=chief', { headers, signal: ac.signal })
+  const reader = res.body.getReader()
+  await reader.read()
+  await Promise.resolve()
+  h.ctx.emit('agent/assistant-stream', { agent: { id: 'sess-chief' }, frame: { type: 'start', attemptId: 'a1', turn: 42 } })
+  let got = ''
+  for (let i = 0; i < 20 && !got.includes('"turn":42'); i++) {
+    const { value, done } = await Promise.race([
+      reader.read(),
+      new Promise(r => setTimeout(() => r({ value: undefined, done: false }), 50)),
+    ])
+    if (done) break
+    if (value) got += new TextDecoder().decode(value)
+  }
+  assert.match(got, /event: stream/)
+  assert.match(got, /"turn":42/)
+  ac.abort()
+})
+
 test('SSE test mode still ticks', async (t) => {
   const h = start({ bots: { chief: { id: 'chief', name: 'Chief', sessionId: 's' } } })
   t.after(h.stop)

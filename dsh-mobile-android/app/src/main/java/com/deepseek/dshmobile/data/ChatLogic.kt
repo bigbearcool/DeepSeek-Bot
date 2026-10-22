@@ -27,6 +27,29 @@ object ChatMerge {
         return abs(lt - it) <= WINDOW_MS
     }
 
+    /** One bot bubble per turn in history: keep the first slot, winner is highest seq. */
+    fun collapseTurns(list: List<ChatItem>): List<ChatItem> {
+        val out = mutableListOf<ChatItem>()
+        val slot = mutableMapOf<Long, Int>()
+        for (item in list) {
+            val turn = item.turn
+            if (item.kind == "bot" && turn != null) {
+                val at = slot[turn]
+                if (at == null) {
+                    slot[turn] = out.size
+                    out.add(item)
+                } else {
+                    val existing = out[at]
+                    val winner = if ((item.seq ?: -1L) >= (existing.seq ?: -1L)) item else existing
+                    out[at] = winner
+                }
+            } else {
+                out.add(item)
+            }
+        }
+        return out
+    }
+
     /** Merge one live item (SSE `message`). */
     fun mergeIncoming(list: List<ChatItem>, incoming: ChatItem): List<ChatItem> {
         if (list.any { sameServerItem(it, incoming) }) return list
@@ -62,7 +85,7 @@ object ChatMerge {
                 })
             if (!matched) out = out + item
         }
-        return out
+        return collapseTurns(out)
     }
 
     /** Commit streamed text as a local bot bubble unless the server already delivered it. */

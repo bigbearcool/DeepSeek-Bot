@@ -753,7 +753,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .onSuccess { page ->
                 _state.update { st ->
                     if (st.selectedBot?.id != bot.id) return@update st
-                    val merged = if (reset) ChatMerge.mergeHistory(st.messages, page.items) else page.items + st.messages
+                    val merged = if (reset) {
+                        ChatMerge.mergeHistory(st.messages, page.items)
+                    } else {
+                        ChatMerge.collapseTurns(page.items + st.messages)
+                    }
                     st.copy(busy = false, messages = merged, nextCursor = page.nextCursor)
                 }
             }

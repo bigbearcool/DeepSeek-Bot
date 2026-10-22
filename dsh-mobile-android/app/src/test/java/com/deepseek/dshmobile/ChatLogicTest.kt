@@ -89,6 +89,15 @@ class ChatMergeTest {
         assertEquals(1, ChatMerge.commitStreamed(listOf(server), "**答**", 2_000_200).size)
     }
 
+    @Test fun streamedBubbleWithTurnReplacedBySameTurnServerItem() {
+        val streamed = ChatMerge.commitStreamed(emptyList(), "答", 2_000_000, turn = 7)
+        assertEquals(7L, streamed.single().turn)
+        val server = ChatItem(kind = "bot", text = "答 final", seq = 20, turn = 7)
+        val out = ChatMerge.mergeIncoming(streamed, server)
+        assertEquals(1, out.size)
+        assertEquals("答 final", out[0].text)
+        assertFalse(out[0].local)
+    }
 }
 
 class WaitMachineTest {

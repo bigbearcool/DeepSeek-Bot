@@ -89,10 +89,10 @@ object ChatMerge {
     }
 
     /** Commit streamed text as a local bot bubble unless the server already delivered it. */
-    fun commitStreamed(list: List<ChatItem>, text: String, now: Long): List<ChatItem> {
+    fun commitStreamed(list: List<ChatItem>, text: String, now: Long, turn: Long? = null): List<ChatItem> {
         if (text.isBlank()) return list
         val dup = list.takeLast(6).any { !it.local && it.kind == "bot" && norm(it.text) == norm(text) }
-        return if (dup) list else list + ChatItem(kind = "bot", text = text, time = now, local = true)
+        return if (dup) list else list + ChatItem(kind = "bot", text = text, time = now, local = true, turn = turn)
     }
 }
 

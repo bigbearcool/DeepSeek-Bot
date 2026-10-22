@@ -48,6 +48,17 @@ class ChatMergeTest {
         assertEquals(1, ChatMerge.mergeIncoming(listOf(a), a.copy()).size)
     }
 
+    @Test fun sameTurnBotReplacedByHigherSeq() {
+        val older = ChatItem(kind = "bot", text = "draft", seq = 10, turn = 3)
+        val newer = ChatItem(kind = "bot", text = "final", seq = 11, turn = 3)
+        val out = ChatMerge.mergeIncoming(listOf(older), newer)
+        assertEquals(1, out.size)
+        assertEquals("final", out[0].text)
+        assertEquals(11L, out[0].seq)
+        val otherTurn = ChatItem(kind = "bot", text = "next", seq = 12, turn = 4)
+        assertEquals(2, ChatMerge.mergeIncoming(out, otherTurn).size)
+    }
+
     @Test fun historyKeepsUnconfirmedAndDropsConfirmed() {
         val other = ChatItem(kind = "user", text = "还没到", time = 1_000_200, clientMessageId = "c9", local = true)
         val page = listOf(ChatItem(kind = "user", text = "你好", time = 1_000_300, seq = 10))

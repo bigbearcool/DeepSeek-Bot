@@ -30,6 +30,19 @@ object ChatMerge {
     /** Merge one live item (SSE `message`). */
     fun mergeIncoming(list: List<ChatItem>, incoming: ChatItem): List<ChatItem> {
         if (list.any { sameServerItem(it, incoming) }) return list
+        if (incoming.kind == "bot" && incoming.turn != null) {
+            val j = list.indexOfFirst { it.kind == "bot" && it.turn == incoming.turn }
+            if (j >= 0) {
+                val existing = list[j]
+                val incSeq = incoming.seq ?: -1L
+                val exSeq = existing.seq ?: -1L
+                return if (incSeq >= exSeq) {
+                    list.toMutableList().also { it[j] = incoming }
+                } else {
+                    list
+                }
+            }
+        }
         val i = list.indexOfFirst { matchesLocal(it, incoming) }
         if (i >= 0) {
             val keepId = incoming.clientMessageId ?: list[i].clientMessageId

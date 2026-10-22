@@ -88,6 +88,7 @@ fun parseChatItem(o: JSONObject) = ChatItem(
     text = o.optStringOrNull("text"),
     time = o.optLongOrNull("time"),
     seq = o.optLongOrNull("seq"),
+    turn = o.optLongOrNull("turn"),
     role = o.optStringOrNull("role"),
     botId = o.optStringOrNull("botId"),
     name = o.optStringOrNull("name"),

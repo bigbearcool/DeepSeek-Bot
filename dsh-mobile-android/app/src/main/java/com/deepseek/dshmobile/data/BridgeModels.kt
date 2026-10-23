@@ -51,6 +51,7 @@ data class ChatItem(
     val text: String? = null,
     val time: Long? = null,
     val seq: Long? = null,
+    val turn: Long? = null,
     val role: String? = null,
     val botId: String? = null,
     val name: String? = null,

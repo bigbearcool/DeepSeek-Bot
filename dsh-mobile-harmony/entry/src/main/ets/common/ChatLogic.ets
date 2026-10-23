@@ -29,9 +29,46 @@ export class ChatMerge {
     return Math.abs(local.time - incoming.time) <= ChatMerge.WINDOW_MS;
   }
 
+  /** One bot bubble per turn in history: keep the first slot, winner is highest seq. */
+  static collapseTurns(list: ChatItem[]): ChatItem[] {
+    const out: ChatItem[] = [];
+    const slot = new Map<number, number>();
+    for (const item of list) {
+      if (item.kind === 'bot' && item.turn !== null) {
+        const turn = item.turn;
+        const at = slot.get(turn);
+        if (at === undefined) {
+          slot.set(turn, out.length);
+          out.push(copyItem(item));
+        } else {
+          const existing = out[at];
+          const incSeq = item.seq !== null ? item.seq : -1;
+          const exSeq = existing.seq !== null ? existing.seq : -1;
+          out[at] = copyItem(incSeq >= exSeq ? item : existing);
+        }
+      } else {
+        out.push(copyItem(item));
+      }
+    }
+    return out;
+  }
+
   static mergeIncoming(list: ChatItem[], incoming: ChatItem): ChatItem[] {
     if (list.some((x: ChatItem) => ChatMerge.sameServerItem(x, incoming))) {
       return list;
+    }
+    if (incoming.kind === 'bot' && incoming.turn !== null) {
+      const j = list.findIndex((x: ChatItem) => x.kind === 'bot' && x.turn !== null && x.turn === incoming.turn);
+      if (j >= 0) {
+        const out = list.slice();
+        const existing = list[j];
+        const incSeq = incoming.seq !== null ? incoming.seq : -1;
+        const exSeq = existing.seq !== null ? existing.seq : -1;
+        if (incSeq >= exSeq) {
+          out[j] = copyItem(incoming);
+        }
+        return out;
+      }
     }
     const i = list.findIndex((x: ChatItem) => ChatMerge.matchesLocal(x, incoming));
     if (i >= 0) {
@@ -50,7 +87,7 @@ export class ChatMerge {
     for (const item of page) {
       out = ChatMerge.mergeIncoming(out, item);
     }
-    return out.sort((a: ChatItem, b: ChatItem) => {
+    return ChatMerge.collapseTurns(out.sort((a: ChatItem, b: ChatItem) => {
       if (a.time !== null && b.time !== null && a.time !== b.time) {
         return a.time - b.time;
       }
@@ -58,7 +95,7 @@ export class ChatMerge {
         return a.seq - b.seq;
       }
       return 0;
-    });
+    }));
   }
 
 }

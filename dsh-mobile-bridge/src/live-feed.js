@@ -138,8 +138,9 @@ export function createLiveFeed({ ctx, adapter, diag = { note() {} }, files = nul
 
     if (frame.type === 'start') {
       if (hidden.has(frame.turn)) return
-      writing.set(frame.attemptId, { botId, sessionId: agent.id })
-      publish('stream', { botId, sessionId: agent.id, attemptId: frame.attemptId, phase: 'start' }, { botId })
+      const turn = frame.turn ?? null
+      writing.set(frame.attemptId, { botId, sessionId: agent.id, turn })
+      publish('stream', { botId, sessionId: agent.id, attemptId: frame.attemptId, phase: 'start', turn }, { botId })
       return
     }
     const target = writing.get(frame.attemptId)

@@ -21,6 +21,7 @@ import com.deepseek.dshmobile.data.BridgeApi
 import com.deepseek.dshmobile.data.BridgeError
 import com.deepseek.dshmobile.data.ChatItem
 import com.deepseek.dshmobile.data.ChatMerge
+import com.deepseek.dshmobile.data.optLongOrNull
 import com.deepseek.dshmobile.data.LaunchRouter
 import com.deepseek.dshmobile.data.SseClient
 import com.deepseek.dshmobile.data.SseEvent
@@ -140,6 +141,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val prefsStore = com.deepseek.dshmobile.data.ChatPrefsStore(app)
     private var streamJob: Job? = null
     private var pollJob: Job? = null
+    private var streamTurn: Long? = null
 
     init {
         viewModelScope.launch { prefsStore.flow.collect { p -> _state.update { it.copy(prefs = p) }; syncService() } }
@@ -753,7 +755,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .onSuccess { page ->
                 _state.update { st ->
                     if (st.selectedBot?.id != bot.id) return@update st
-                    val merged = if (reset) ChatMerge.mergeHistory(st.messages, page.items) else page.items + st.messages
+                    val merged = if (reset) {
+                        ChatMerge.mergeHistory(st.messages, page.items)
+                    } else {
+                        ChatMerge.collapseTurns(page.items + st.messages)
+                    }
                     st.copy(busy = false, messages = merged, nextCursor = page.nextCursor)
                 }
             }
@@ -863,12 +869,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             "stream" -> {
                 val data = ev.json()
                 when (data.optString("phase")) {
-                    "start" -> _state.update { it.copy(wait = WaitMachine.reduce(it.wait, WaitEvent.StreamStart)) }
+                    "start" -> {
+                        streamTurn = data.optLongOrNull("turn")
+                        _state.update { it.copy(wait = WaitMachine.reduce(it.wait, WaitEvent.StreamStart)) }
+                    }
                     "end" -> _state.update { st ->
                         val text = st.wait.text
+                        val turn = streamTurn
+                        streamTurn = null
                         st.copy(
                             messages = if (st.wait.phase == WaitPhase.Streaming)
-                                ChatMerge.commitStreamed(st.messages, text, System.currentTimeMillis()) else st.messages,
+                                ChatMerge.commitStreamed(st.messages, text, System.currentTimeMillis(), turn) else st.messages,
                             wait = WaitMachine.reduce(st.wait, WaitEvent.StreamEnd),
                         )
                     }
@@ -1095,6 +1106,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun stopStream() {
         streamJob?.cancel()
         streamJob = null
+        streamTurn = null
         _state.update { it.copy(reconnecting = false) }
     }
 

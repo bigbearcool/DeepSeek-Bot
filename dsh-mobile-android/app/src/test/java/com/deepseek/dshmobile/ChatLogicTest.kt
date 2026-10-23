@@ -48,6 +48,30 @@ class ChatMergeTest {
         assertEquals(1, ChatMerge.mergeIncoming(listOf(a), a.copy()).size)
     }
 
+    @Test fun sameTurnBotReplacedByHigherSeq() {
+        val older = ChatItem(kind = "bot", text = "draft", seq = 10, turn = 3)
+        val newer = ChatItem(kind = "bot", text = "final", seq = 11, turn = 3)
+        val out = ChatMerge.mergeIncoming(listOf(older), newer)
+        assertEquals(1, out.size)
+        assertEquals("final", out[0].text)
+        assertEquals(11L, out[0].seq)
+        val otherTurn = ChatItem(kind = "bot", text = "next", seq = 12, turn = 4)
+        assertEquals(2, ChatMerge.mergeIncoming(out, otherTurn).size)
+    }
+
+    @Test fun historyCollapsesDuplicateTurnsKeepingFirstSlot() {
+        val a = ChatItem(kind = "bot", text = "old", seq = 5, turn = 2, time = 100)
+        val u = ChatItem(kind = "user", text = "q", seq = 6, time = 200)
+        val b = ChatItem(kind = "bot", text = "new", seq = 10, turn = 2, time = 300)
+        val out = ChatMerge.collapseTurns(listOf(a, u, b))
+        assertEquals(2, out.size)
+        assertEquals("new", out[0].text)
+        assertEquals(10L, out[0].seq)
+        assertEquals("q", out[1].text)
+        val page = listOf(a, u, b)
+        assertEquals(listOf("new", "q"), ChatMerge.mergeHistory(emptyList(), page).map { it.text })
+    }
+
     @Test fun historyKeepsUnconfirmedAndDropsConfirmed() {
         val other = ChatItem(kind = "user", text = "还没到", time = 1_000_200, clientMessageId = "c9", local = true)
         val page = listOf(ChatItem(kind = "user", text = "你好", time = 1_000_300, seq = 10))
@@ -63,6 +87,16 @@ class ChatMergeTest {
         assertEquals(1, ChatMerge.mergeIncoming(streamed, server).size)
         // and the reverse order: server first, then stream end
         assertEquals(1, ChatMerge.commitStreamed(listOf(server), "**答**", 2_000_200).size)
+    }
+
+    @Test fun streamedBubbleWithTurnReplacedBySameTurnServerItem() {
+        val streamed = ChatMerge.commitStreamed(emptyList(), "答", 2_000_000, turn = 7)
+        assertEquals(7L, streamed.single().turn)
+        val server = ChatItem(kind = "bot", text = "答 final", seq = 20, turn = 7)
+        val out = ChatMerge.mergeIncoming(streamed, server)
+        assertEquals(1, out.size)
+        assertEquals("答 final", out[0].text)
+        assertFalse(out[0].local)
     }
 }
 

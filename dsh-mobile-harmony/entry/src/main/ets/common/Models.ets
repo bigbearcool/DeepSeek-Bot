@@ -46,6 +46,7 @@ export interface ChatItem {
   text: string | null;
   time: number | null;
   seq: number | null;
+  turn: number | null;
   role: string | null;
   botId: string | null;
   name: string | null;
@@ -57,7 +58,7 @@ export interface ChatItem {
 
 export function newItem(kind: string, text: string | null, time: number | null): ChatItem {
   const i: ChatItem = {
-    kind: kind, text: text, time: time, seq: null, role: null, botId: null, name: null,
+    kind: kind, text: text, time: time, seq: null, turn: null, role: null, botId: null, name: null,
     clientMessageId: null, local: false, cut: false, attachments: []
   };
   return i;
@@ -65,8 +66,8 @@ export function newItem(kind: string, text: string | null, time: number | null):
 
 export function copyItem(a: ChatItem): ChatItem {
   const i: ChatItem = {
-    kind: a.kind, text: a.text, time: a.time, seq: a.seq, role: a.role, botId: a.botId, name: a.name,
-    clientMessageId: a.clientMessageId, local: a.local, cut: a.cut, attachments: a.attachments
+    kind: a.kind, text: a.text, time: a.time, seq: a.seq, turn: a.turn, role: a.role, botId: a.botId,
+    name: a.name, clientMessageId: a.clientMessageId, local: a.local, cut: a.cut, attachments: a.attachments
   };
   return i;
 }
@@ -270,6 +271,7 @@ export function parseChatItem(o: JObj): ChatItem {
     text: J.str(o, 'text'),
     time: J.num(o, 'time'),
     seq: J.num(o, 'seq'),
+    turn: J.num(o, 'turn'),
     role: J.str(o, 'role'),
     botId: J.str(o, 'botId'),
     name: J.str(o, 'name'),

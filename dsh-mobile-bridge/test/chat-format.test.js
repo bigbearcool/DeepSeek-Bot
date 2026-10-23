@@ -16,6 +16,26 @@ test('displayItems hides exchange turns', () => {
   assert.deepEqual(items, [])
 })
 
+test('displayItems includes turn on bot items', () => {
+  const items = displayItems('s1', [{
+    type: 'assistant/message',
+    time: 2,
+    seq: 3,
+    data: { turn: 4, message: { content: [{ type: 'text', text: 'hi' }] } },
+  }])
+  assert.deepEqual(items, [{ kind: 'bot', text: 'hi', time: 2, seq: 3, turn: 4 }])
+})
+
+test('displayItems sets turn null when assistant message has no turn', () => {
+  const items = displayItems('s1', [{
+    type: 'assistant/message',
+    time: 1,
+    seq: 1,
+    data: { message: { content: [{ type: 'text', text: 'x' }] } },
+  }])
+  assert.equal(items[0].turn, null)
+})
+
 test('partsOfBot builds earlier + current', () => {
   const parts = partsOfBot({
     bots: {

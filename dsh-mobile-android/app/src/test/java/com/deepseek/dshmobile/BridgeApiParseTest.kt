@@ -21,5 +21,8 @@ class BridgeApiParseTest {
         assertEquals("hi", user.text)
         val bot = parseChatItem(JSONObject("""{"kind":"bot","text":"yo"}"""))
         assertEquals("bot", bot.kind)
+        assertEquals(null, bot.turn)
+        val withTurn = parseChatItem(JSONObject("""{"kind":"bot","text":"yo","turn":7}"""))
+        assertEquals(7L, withTurn.turn)
     }
 }

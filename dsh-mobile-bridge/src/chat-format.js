@@ -61,7 +61,13 @@ export function displayItems(partId, events, exchangeTurns = {}) {
       const content = Array.isArray(event.data?.message?.content) ? event.data.message.content : []
       for (const block of content) {
         if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '') {
-          items.push({ kind: 'bot', text: block.text, time: event.time, seq: event.seq })
+          items.push({
+            kind: 'bot',
+            text: block.text,
+            time: event.time,
+            seq: event.seq,
+            turn: event.data?.turn ?? null,
+          })
         }
       }
       continue

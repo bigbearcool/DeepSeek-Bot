@@ -83,6 +83,7 @@ cd dsh-mobile-android
 
 | 日期 | 合并提交 | 上游 PR |
 |---|---|---|
+| 2026-10-23 | `ff75796` | #466 活动行保持稳定、默认隐藏思考：多步回合里每轮工具前的实时思考不再顶掉活动行；设置 › 通用 › 外观新增「显示思考」开关（默认关），关闭时仅用活动行作进行中信号；Bot 对话不再绘制 DSH 上下文行（工具更新/注入上下文），中途插入的 Bot 消息仍从对应步骤取事件行；Fixes #465 |
 | 2026-10-23 | `28f3c85` | #461 桌面 App 可将 Cookie 导入 Bot 浏览器：支持 Cookie-Editor JSON / Netscape cookies.txt / Playwright storageState / Selenium 等文件，或从本机 Chromium/Firefox 配置目录克隆并由源浏览器经 CDP 解密；预览确认后再写入 Bot 分区并落盘（报告只含名称/站点/原因，不含值）；apply 需 `bot:` 存储键；Windows 路径在各主机用 win32.dirname 解析<br>#462 发布 0.2.1：ds-bot / app / engine 版本与 changelog 同步到 0.2.1，并列出 #461 Cookie 导入 |
 | 2026-10-23 | `91a5a70` | #459 Prepare 0.3.0：版本号与 changelog（ds-bot / app / engine 升至 0.3.0，汇总自 0.2.0 以来已合入 PR 的 Changelog；安装说明中的 tgz / github 引用同步到 v0.3.0） |
 | 2026-10-23 | `bf50950` | #451 桌面 App 独立 Bot browser bridge：App 侧提供与 DSH Desktop 同形的 bridge，租用固定偏好的 webview，各 Bot 登录态落盘直至删除，Host 在 DS_BOT_APP 下提供 read_browser；Fixes #449 |

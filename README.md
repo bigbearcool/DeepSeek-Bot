@@ -15,7 +15,7 @@ English | [中文](README.zh.md)
 
 这是在上游 DeepSeek-Bot 基础上改的版本，让你在 DeepSeek Harness（DSH）里养一群 Bot，并且能用手机和它们聊天。仓库里主要有这几块：
 
-- **`ds-bot/`**（当前 0.2.0）：DS Bot 插件本体。在 DSH 里创建 Bot、和 Bot 单聊、拉 Bot 进群聊。本 fork 在上游基础上加了「每个 Bot 单独指定 Agent 预设」等改动。
+- **`ds-bot/`**（当前 0.2.1）：DS Bot 插件本体。在 DSH 里创建 Bot、和 Bot 单聊、拉 Bot 进群聊。本 fork 在上游基础上加了「每个 Bot 单独指定 Agent 预设」等改动。
 - **`dsh-mobile-bridge/`**（当前 0.0.19）：DSH 插件，给手机开一个专用接口，负责配对和收发消息。
 - **`dsh-mobile-android/`**（当前 0.2.4）：Android 手机 App。
 - **`dsh-mobile-harmony/`**：纯血鸿蒙（HarmonyOS NEXT）原生 App，功能和 Android 版对齐。
@@ -27,7 +27,7 @@ English | [中文](README.zh.md)
 
 ```sh
 cd ds-bot
-npm pack            # 生成 ds-bot-0.2.0.tgz
+npm pack            # 生成 ds-bot-0.2.1.tgz
 ```
 
 在 DSH 的插件页里「添加插件」时填这个 tgz 的完整路径，或者用命令行 `dsh plugin add <tgz 路径>`，启用后重启 DSH。
@@ -83,6 +83,7 @@ cd dsh-mobile-android
 
 | 日期 | 合并提交 | 上游 PR |
 |---|---|---|
+| 2026-10-23 | `28f3c85` | #461 桌面 App 可将 Cookie 导入 Bot 浏览器：支持 Cookie-Editor JSON / Netscape cookies.txt / Playwright storageState / Selenium 等文件，或从本机 Chromium/Firefox 配置目录克隆并由源浏览器经 CDP 解密；预览确认后再写入 Bot 分区并落盘（报告只含名称/站点/原因，不含值）；apply 需 `bot:` 存储键；Windows 路径在各主机用 win32.dirname 解析<br>#462 发布 0.2.1：ds-bot / app / engine 版本与 changelog 同步到 0.2.1，并列出 #461 Cookie 导入 |
 | 2026-10-23 | `91a5a70` | #459 Prepare 0.3.0：版本号与 changelog（ds-bot / app / engine 升至 0.3.0，汇总自 0.2.0 以来已合入 PR 的 Changelog；安装说明中的 tgz / github 引用同步到 v0.3.0） |
 | 2026-10-23 | `bf50950` | #451 桌面 App 独立 Bot browser bridge：App 侧提供与 DSH Desktop 同形的 bridge，租用固定偏好的 webview，各 Bot 登录态落盘直至删除，Host 在 DS_BOT_APP 下提供 read_browser；Fixes #449 |
 | 2026-10-23 | `49a25fa` | #413 旁路问答（btw）：对正在工作的 Bot 顺便问一句，不打断主任务、不写入模型可见历史；私聊以 `/btw ` 触发，答案以卡片呈现（忙时停输入框上方、结束后移到回合尾）<br>#457 Linux 打包检查：打包应用 composer 仅在可获焦后再点击，超时报告页面状态，避免竞态误判 |

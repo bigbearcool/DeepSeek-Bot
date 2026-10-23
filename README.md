@@ -16,7 +16,7 @@ English | [中文](README.zh.md)
 这是在上游 DeepSeek-Bot 基础上改的版本，让你在 DeepSeek Harness（DSH）里养一群 Bot，并且能用手机和它们聊天。仓库里主要有这几块：
 
 - **`ds-bot/`**（当前 0.2.1）：DS Bot 插件本体。在 DSH 里创建 Bot、和 Bot 单聊、拉 Bot 进群聊。本 fork 在上游基础上加了「每个 Bot 单独指定 Agent 预设」等改动。
-- **`dsh-mobile-bridge/`**（当前 0.0.19）：DSH 插件，给手机开一个专用接口，负责配对和收发消息。
+- **`dsh-mobile-bridge/`**（当前 0.0.21）：DSH 插件，给手机开一个专用接口，负责配对和收发消息。
 - **`dsh-mobile-android/`**（当前 0.2.4）：Android 手机 App。
 - **`dsh-mobile-harmony/`**：纯血鸿蒙（HarmonyOS NEXT）原生 App，功能和 Android 版对齐。
 - **`app/`、`docker/`**：上游自带的桌面应用和 Docker 镜像，用法见下面的英文原文。
@@ -36,8 +36,8 @@ npm pack            # 生成 ds-bot-0.2.1.tgz
 
 ```sh
 cd dsh-mobile-bridge
-npm pack            # 生成 dsh-mobile-bridge-0.0.19.tgz
-dsh plugin add <dsh-mobile-bridge-0.0.19.tgz 的路径>
+npm pack            # 生成 dsh-mobile-bridge-0.0.21.tgz
+dsh plugin add <dsh-mobile-bridge-0.0.21.tgz 的路径>
 ```
 
 启用后重启 DSH。插件会另外监听 **3081 端口**给手机用。手机不在同一个局域网时，要用你自己的反向代理把例如 `https://example.com:8443` 转到这台机器的 3081。
@@ -111,7 +111,7 @@ cd dsh-mobile-android
 
 在手机上使用 DS Bot 的配套方案，源码在本仓库：
 
-- **dsh-mobile-bridge**（DSH 插件，当前 0.0.19）：给手机提供接口，新建 Bot、建群、切换模型等直接调用 ds-bot 现有接口，校验和桌面一致。
+- **dsh-mobile-bridge**（DSH 插件，当前 0.0.21）：给手机提供接口，新建 Bot、建群、切换模型等直接调用 ds-bot 现有接口，校验和桌面一致。
 - **dsh-mobile-android**（Android App，当前 0.2.4，Kotlin + Compose）。
 - **dsh-mobile-harmony**（鸿蒙原生 App，ArkTS + ArkUI，包名 `com.deepseek.dshmobile.harmony`）。
 

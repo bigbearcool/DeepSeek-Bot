@@ -1,21 +1,21 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.svg">
-    <img src="docs/images/logo.svg" alt="DeepSeek Bot" width="260">
+    <img src="docs/images/logo.svg" alt="DS Bot" width="260">
   </picture>
 </p>
 
-# DeepSeek Bot
+# DS Bot
 
 English | [中文](README.zh.md)
 
-> **这是 [Fei2411/DeepSeek-Bot](https://github.com/Fei2411/DeepSeek-Bot) 的 fork。** 上游：https://github.com/Fei2411/DeepSeek-Bot 。前面的中文部分（这个仓库是做什么的 / 怎么装 / 装好后能做什么 / 与上游的差异 / 已合入的上游功能 / 手机 App）是本 fork 自己写的；从「Install」开始是上游原文。
+> **这是 [Fei2411/DS-Bot](https://github.com/Fei2411/DS-Bot)（原 DeepSeek-Bot）的 fork。** 上游：https://github.com/Fei2411/DS-Bot （旧名 DeepSeek-Bot 仍可跳转）。前面的中文部分（这个仓库是做什么的 / 怎么装 / 装好后能做什么 / 与上游的差异 / 已合入的上游功能 / 手机 App）是本 fork 自己写的；从「Install」开始是上游原文。
 
 ## 这个仓库是做什么的
 
 这是在上游 DeepSeek-Bot 基础上改的版本，让你在 DeepSeek Harness（DSH）里养一群 Bot，并且能用手机和它们聊天。仓库里主要有这几块：
 
-- **`ds-bot/`**（当前 0.2.1）：DS Bot 插件本体。在 DSH 里创建 Bot、和 Bot 单聊、拉 Bot 进群聊。本 fork 在上游基础上加了「每个 Bot 单独指定 Agent 预设」等改动。
+- **`ds-bot/`**（当前 0.2.2）：DS Bot 插件本体。在 DSH 里创建 Bot、和 Bot 单聊、拉 Bot 进群聊。本 fork 在上游基础上加了「每个 Bot 单独指定 Agent 预设」等改动。
 - **`dsh-mobile-bridge/`**（当前 0.0.21）：DSH 插件，给手机开一个专用接口，负责配对和收发消息。
 - **`dsh-mobile-android/`**（当前 0.2.4）：Android 手机 App。
 - **`dsh-mobile-harmony/`**：纯血鸿蒙（HarmonyOS NEXT）原生 App，功能和 Android 版对齐。
@@ -27,7 +27,7 @@ English | [中文](README.zh.md)
 
 ```sh
 cd ds-bot
-npm pack            # 生成 ds-bot-0.2.1.tgz
+npm pack            # 生成 ds-bot-0.2.2.tgz
 ```
 
 在 DSH 的插件页里「添加插件」时填这个 tgz 的完整路径，或者用命令行 `dsh plugin add <tgz 路径>`，启用后重启 DSH。
@@ -83,6 +83,7 @@ cd dsh-mobile-android
 
 | 日期 | 合并提交 | 上游 PR |
 |---|---|---|
+| 2026-10-26 | `7cd53a9` | 合入 upstream/dev 至 `f7be837`（落后 131）：#417 团队级浏览器插件（每 Bot 独立 profile）与 Playwright/refs 驱动；#528 Bot 浏览器接管与隔离视图、下载落工作区；#522 旁路问答 /btw 迁入侧聊；#468/#471/#477 视图卡片图表与菜单；#470/#474 右侧栏单开与 Tab 胶囊宽度；#487/#488/#492/#495/#497 交接结果持久化、命名请求去重、记忆事务恢复与失败提示；#486 文件夹移动行；#496 Linux 包上传；#499 About 显示更新状态；#503 Cookie 导入失败 hardening；#505 已安装插件热更；#541/#546 发布 0.2.2 与审阅修复；#547 NOTICE 标明 Playwright；#552 项目更名为 DS Bot、链接指向 Fei2411/DS-Bot |
 | 2026-10-23 | `50e8df3` | #467 在 0.2.1 changelog 补记 thinking 开关与稳态活动行：Changed 写明默认隐藏思考、设置 › 通用 › 外观「显示思考」；Fixed 写明多步回合活动行不再闪烁消失；对应 #465/#466（功能此前已合入） |
 | 2026-10-23 | `ff75796` | #466 活动行保持稳定、默认隐藏思考：多步回合里每轮工具前的实时思考不再顶掉活动行；设置 › 通用 › 外观新增「显示思考」开关（默认关），关闭时仅用活动行作进行中信号；Bot 对话不再绘制 DSH 上下文行（工具更新/注入上下文），中途插入的 Bot 消息仍从对应步骤取事件行；Fixes #465 |
 | 2026-10-23 | `28f3c85` | #461 桌面 App 可将 Cookie 导入 Bot 浏览器：支持 Cookie-Editor JSON / Netscape cookies.txt / Playwright storageState / Selenium 等文件，或从本机 Chromium/Firefox 配置目录克隆并由源浏览器经 CDP 解密；预览确认后再写入 Bot 分区并落盘（报告只含名称/站点/原因，不含值）；apply 需 `bot:` 存储键；Windows 路径在各主机用 win32.dirname 解析<br>#462 发布 0.2.1：ds-bot / app / engine 版本与 changelog 同步到 0.2.1，并列出 #461 Cookie 导入 |
@@ -162,7 +163,7 @@ hvigorw test -p module=entry@default --no-daemon     # 跑单测
 
 ![version](https://img.shields.io/badge/version-v0.2_preview-blue) ![DSH](https://img.shields.io/badge/DSH-0.2.1--rc.2-4D6BFE) ![license](https://img.shields.io/badge/license-Apache_2.0-green)
 
-DeepSeek Bot (DS Bot) is a bot plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH). It turns DSH into bots. You create your own bots, then talk and work with them.
+DS Bot is a bot plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH). It turns DSH into bots. You create your own bots, then talk and work with them.
 
 ![Say one sentence to Chief, and it sets up the bots and the group chat](docs/images/team.png)
 
@@ -170,7 +171,7 @@ DeepSeek Bot (DS Bot) is a bot plugin for [DeepSeek Harness](https://github.com/
 
 **Desktop app (Windows, macOS, Linux)**
 
-The desktop app brings its own DSH, so you don't need to install DSH first. Download it from [Releases](https://github.com/Fei2411/DeepSeek-Bot/releases):
+The desktop app brings its own DSH, so you don't need to install DSH first. Download it from [Releases](https://github.com/Fei2411/DS-Bot/releases):
 
 - Windows (x64): `DeepSeek-Bot-<version>-win-x64.exe`. Run it; it installs for your user only, without administrator rights. If Windows shows "Windows protected your PC", select **More info** → **Run anyway**.
 - macOS: `DeepSeek-Bot-<version>-mac-arm64.zip` for an Apple chip, `DeepSeek-Bot-<version>-mac-x64.zip` for Intel. Safari unzips it by itself; drag **DeepSeek Bot** into **Applications** and open it. When macOS says it cannot check the app, open **System Settings** → **Privacy & Security** and select **Open Anyway**.
@@ -188,7 +189,9 @@ First install DSH and set up at least one model in it. DS Bot uses the models fr
 2. In **Package name or address**, enter `ds-bot`. In mainland China, set **Registry** to **Mainland China mirror**.
 3. Select **Install**, then **Enable now**. If DSH says the change takes effect at the next start, quit DSH completely and open it again.
 
-If npm is not reachable, in step 2 you can also enter the full path of `ds-bot-0.2.1.tgz` downloaded from [Releases](https://github.com/Fei2411/DeepSeek-Bot/releases), or `github:Fei2411/DeepSeek-Bot#v0.2.1&path:/ds-bot` (needs Git).
+If npm is not reachable, in step 2 you can also enter the full path of `ds-bot-0.2.1.tgz` downloaded from [Releases](https://github.com/Fei2411/DS-Bot/releases), or `github:Fei2411/DS-Bot#v0.2.1&path:/ds-bot` (needs Git).
+
+DS Bot 0.2.1 and earlier cannot update themselves in DSH Desktop 0.2.1-rc.2 or later: on the Plugins page, remove `ds-bot` and add `ds-bot` again. The Bots, chats and memory stay.
 
 **DSH Web (Windows, macOS, Linux)**
 

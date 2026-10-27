@@ -70,3 +70,11 @@ The full workflow is in [CONTRIBUTING.md](CONTRIBUTING.md#how-we-work). The part
 - Commit messages in English, imperative subject, the reason in the body. Keep commits small.
 - The person who asked for the change is the commit author. Do not set an AI agent or bot as author or committer, and do not add `Co-authored-by` lines for one.
 - User-facing text in the plugin is English. Keep the README and README.zh.md in step when you change one of them.
+
+## Cursor Cloud
+
+The image runs Node from `/exec-daemon/node`. That binary has no headers beside it, and DeepSeek Harness looks for Node-API headers at `/include/node`. The environment install places the headers for the running Node version there before `pnpm run build`.
+
+`/workspace/deepseek-harness` is a gitignored checkout of tag `dsh-v0.2.1-rc.2`. `pnpm install` in that checkout does not emit client bundles. Run `pnpm run build` there before `dev/bench.sh`, or the Web server exits with a missing `lib/client.js`. Unit tests and the linter still load `ds-bot/dev/harness` from `npm run harness`, the same packages CI installs.
+
+Desktop app tests use `ELECTRON_SKIP_BINARY_DOWNLOAD=1` in `app/`. The Electron window targets Windows and macOS. Android and Harmony stay on their own SDKs and are not installed here. Benches use the mock model and write only under `.dsh-test-<name>/`. Stop every bench you start.

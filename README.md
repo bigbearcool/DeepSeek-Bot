@@ -83,6 +83,7 @@ cd dsh-mobile-android
 
 | 日期 | 合并提交 | 上游 PR |
 |---|---|---|
+| 2026-10-27 | `9aa7ce3` | 合入 upstream/dev 至 `79a4a52`：#607/#601 长文排版（fix/601-long-text-typography）：聊天气泡放宽行距，桌面 App 改由系统挑选 CJK 字体，用户气泡统一更松行高 |
 | 2026-10-27 | `f9ed2aa` | 合入 upstream/dev 至 `6a69d66`：#598/#581 转向消息未读标签（feat/581-steer-unread）：待处理转向气泡下显示「未读 / Not read yet」，Bot 读过后消失 |
 | 2026-10-27 | `886067d` | 合入 upstream/dev 至 `05477ba`：#587 排队消息被 steer 时重启活动行计时（fix/580-steer-clock）；#566 输入框附件单独成行显示（fix/565-composer-attachments-row） |
 | 2026-10-26 | `ec51441` | 合入 upstream/dev 至 `f7be837`（落后 131）：#417 团队级浏览器插件（每 Bot 独立 profile）与 Playwright/refs 驱动；#528 Bot 浏览器接管与隔离视图、下载落工作区；#522 旁路问答 /btw 迁入侧聊；#468/#471/#477 视图卡片图表与菜单；#470/#474 右侧栏单开与 Tab 胶囊宽度；#487/#488/#492/#495/#497 交接结果持久化、命名请求去重、记忆事务恢复与失败提示；#486 文件夹移动行；#496 Linux 包上传；#499 About 显示更新状态；#503 Cookie 导入失败 hardening；#505 已安装插件热更；#541/#546 发布 0.2.2 与审阅修复；#547 NOTICE 标明 Playwright；#552 项目更名为 DS Bot、链接指向 Fei2411/DS-Bot |
